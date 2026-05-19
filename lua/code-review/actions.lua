@@ -168,6 +168,16 @@ local function ensure_comment()
 end
 
 local function visual_range()
+  local mode = vim.api.nvim_get_mode().mode
+  if mode == "v" or mode == "V" or mode == "\022" then
+    local a = vim.fn.line("v")
+    local b = vim.fn.line(".")
+    if a > b then
+      a, b = b, a
+    end
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "n", false)
+    return a, b
+  end
   local start_pos = vim.fn.getpos("'<")
   local end_pos = vim.fn.getpos("'>")
   local a = start_pos[2]
@@ -201,6 +211,10 @@ function M.add_reference()
     return
   end
   local start_line, end_line = visual_range()
+  if start_line < 1 or end_line < start_line then
+    notify.warn("Select lines before adding a File Reference.")
+    return
+  end
   local snapshot = vim.api.nvim_buf_get_lines(bufnr, start_line - 1, end_line, false)
   local comment, review = ensure_comment()
   if not comment then

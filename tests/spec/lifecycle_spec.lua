@@ -45,6 +45,35 @@ describe("lifecycle and keymaps", function()
     vim.cmd("lcd " .. vim.fn.fnameescape(original_cwd))
   end)
 
+  it("captures the active visual selection from the add-reference mapping", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local state = require("code-review.state")
+    local model = require("code-review.model")
+
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "one", "two", "three", "four", "five" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" }, keymaps = { prefix = "<leader>r" } })
+
+    vim.cmd.edit(project .. "/x.lua")
+    code_review.start()
+    actions.create_review("Visual")
+
+    vim.api.nvim_win_set_cursor(0, { 4, 0 })
+    vim.cmd("normal Vj\\ra")
+
+    local review = model.find_review(state.get().store, state.get().active_review_id)
+    local ref = review.comments[1].file_references[1]
+    assert.equals(4, ref.start_line)
+    assert.equals(5, ref.end_line)
+    assert.same({ "four", "five" }, ref.selected_lines_snapshot)
+    assert.equals("n", vim.api.nvim_get_mode().mode)
+
+    code_review.quit()
+  end)
+
   it("blocks review switching while a comment is open", function()
     local code_review = require("code-review")
     local config = require("code-review.config")
