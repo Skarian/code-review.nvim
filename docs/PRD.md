@@ -17,7 +17,7 @@ The MVP supports:
 - project-scoped Reviews that persist locally;
 - Comments with one body and one or more exact line references;
 - linewise visual selection capture;
-- manual comment editing;
+- Snacks-powered Comment composer flow;
 - voice transcription through a bundled Node/TypeScript helper;
 - stale-reference detection;
 - current-buffer highlights; and
@@ -63,12 +63,12 @@ The workflow is code-buffer-first. The sidebar is a persistent overview and stat
 ## Vocabulary
 
 - **Review**: a named, durable collection of Comments scoped to one project root.
-- **Comment**: one review note. It has one body and zero or more File References. It is complete only when it has at least one File Reference and non-empty body text after trimming whitespace.
+- **Comment**: one review note. It has one body and one or more File References. Persisted Comments are complete by construction: at least one File Reference and non-empty body text after trimming whitespace.
 - **File Reference**: an exact linewise reference to one saved file inside the locked project root. It stores relative path, one-based inclusive start/end lines, and the selected line snapshot.
-- **Current Comment**: the active Comment receiving references, edits, or voice transcription.
+- **Selected Comment**: the active persisted Comment for sidebar highlighting, picker jump targets, or edit/delete actions.
 - **Current File Reference**: the active File Reference inside an open Comment.
 - **Sidebar**: a persistent read-only right split shown while Review Mode is active.
-- **Comment Body Editor**: a plugin-owned scratch editor using `buftype=acwrite`; `:w` saves to Review data, not disk.
+- **Comment Composer**: a Snacks-powered floating scratch buffer for creating or editing complete Comments. It owns draft body text, draft references, validation, and local voice state until submit or cancel.
 - **Preview**: an editable scratch buffer opened in the current window. It is regenerated from Review data and is never persisted by the plugin.
 - **Stale File Reference**: a File Reference whose file is missing, range is invalid for current contents, current lines differ from the snapshot, or the reference cannot be checked safely.
 
@@ -166,17 +166,10 @@ Default configuration:
   keymaps = {
     enabled = true,
     prefix = "<leader>r",
-    open_picker = "r",
-    new_comment = "n",
+    review_picker = "R",
     add_reference = "a",
-    edit_comment = "c",
-    toggle_voice = "s",
-    next = "j",
-    previous = "k",
-    open_current = "o",
-    delete_reference = "x",
-    delete_comment = "d",
-    close_comment = "b",
+    append_reference = "r",
+    edit_comment = "e",
     preview = "p",
     quit = "q",
   },
@@ -225,17 +218,10 @@ Default action mappings:
 
 | Mapping | Mode | Action |
 | --- | --- | --- |
-| `<leader>rr` | Normal | Open Review picker. If Review Mode is inactive, start it first. |
-| `<leader>rn` | Normal | Create new empty Comment. |
-| `<leader>ra` | Visual | Add selected lines as File Reference. |
-| `<leader>rc` | Normal | Edit current Comment body. |
-| `<leader>rs` | Normal | Toggle voice recording/transcription append. |
-| `<leader>rj` | Normal | Next Comment or File Reference. |
-| `<leader>rk` | Normal | Previous Comment or File Reference. |
-| `<leader>ro` | Normal | Open current Comment or jump to current File Reference. |
-| `<leader>rx` | Normal | Delete current File Reference after confirmation. |
-| `<leader>rd` | Normal | Delete current Comment after confirmation. |
-| `<leader>rb` | Normal | Close current Comment. |
+| `<leader>ra` | Visual | Create a new Comment from the selected lines and open the composer. |
+| `<leader>rr` | Visual | Append selected lines to an existing Comment through the Comment picker. |
+| `<leader>re` | Normal | Open the Comment picker for edit, delete, or jump actions. |
+| `<leader>rR` | Normal | Open Review picker. If Review Mode is inactive, start it first. |
 | `<leader>rp` | Normal | Open preview. |
 | `<leader>rq` | Normal | Exit Review Mode. |
 
@@ -243,10 +229,10 @@ Rules:
 
 - No bare single-key mappings that shadow normal editing keys.
 - Default mappings are prefixed action mappings under `keymaps.prefix`.
-- `open_picker` is the key-driven entry action. If inactive, it performs the same startup work as `:CodeReview` and then opens the Review picker. If active, it opens the Review picker subject to state guards.
-- Actions other than `open_picker` require Review Mode to be active and notify without side effects when inactive.
+- `review_picker` is the key-driven Review picker action. If inactive, it performs the same startup work as `:CodeReview` and then opens the Review picker. If active, it opens the Review picker subject to state guards.
+- Actions other than `review_picker` require Review Mode to be active and notify without side effects when inactive.
 - Default mappings must not make `<leader>r` itself wait for a shorter conflicting mapping, because `<leader>r` is not mapped by the plugin.
-- Default child mappings are installed at setup time so `<leader>rr` can start Review Mode from inactive state.
+- Default child mappings are installed at setup time so `<leader>rR` can start Review Mode from inactive state.
 - Do not map terminal, help, prompt, quickfix, sidebar, preview, or comment editor buffers except for buffer-specific UI behavior.
 - Visual add-reference must capture visual marks before leaving visual mode.
 - Optional `which-key.nvim` registration must be idempotent and must not warn when absent.
@@ -259,9 +245,7 @@ States:
 - `inactive`
 - `review_picker`
 - `comment_list`
-- `comment_open`
-- `body_editor_clean`
-- `body_editor_dirty`
+- `composer`
 - `recording`
 - `transcribing`
 - `voice_error_pending`
@@ -271,11 +255,12 @@ Core transitions:
 
 - `:CodeReview` from `inactive` detects and locks the project root, loads the project store, and enters `comment_list` if an active Review exists. Otherwise it opens the Review picker.
 - `:CodeReview` from any active state exits Review Mode.
-- Creating a Comment from `comment_list` enters `comment_open`.
-- Adding a File Reference from `comment_list` creates a Comment, attaches the reference, and enters `comment_open`.
-- Adding a File Reference from `comment_open` attaches to the same Comment.
-- Editing the body from `comment_open` opens the Comment Body Editor.
-- Voice start/stop transitions through `recording`, `transcribing`, and either `comment_open` or `voice_error_pending`.
+- Visual add-reference from `comment_list` opens a new Comment composer with the selected lines as draft reference.
+- Visual append-reference from `comment_list` captures the selected lines and opens the Comment picker. Selecting a Comment appends the captured reference to that Comment.
+- Normal edit-comment from `comment_list` opens the Comment picker. Selecting a Comment opens the composer for editing that persisted Comment.
+- Composer submit validates at least one draft reference and non-empty trimmed body, then creates or updates one persisted Comment.
+- Composer cancel discards draft state. Canceling a new composer creates nothing.
+- Voice start/stop from the composer transitions through `recording`, `transcribing`, and either back to `composer` or to `voice_error_pending`.
 - Opening Preview enters `preview` if validation passes.
 - Closing Preview restores the previous Review Mode state if Review Mode is still active.
 - Quit from any active state stops helper processes, discards transient editor/audio/preview state, closes UI, persists durable data, and returns to `inactive`.
@@ -283,11 +268,11 @@ Core transitions:
 Guards:
 
 - Review picker opens only from `comment_list`.
-- Switching Reviews from `comment_open` notifies: `Close current Comment before switching Reviews.`
-- Preview is blocked while recording, transcribing, voice error pending, or a body editor is open.
-- While a body editor is open, code-buffer Review Mode actions notify: `Save or close the comment editor first.`
-- While voice error is pending, only retry, discard, and quit are allowed.
-- During recording and transcribing, navigation, add-reference, edit-body, delete-comment, delete-reference, Review switching, and preview are blocked.
+- Switching Reviews from `composer`, `recording`, `transcribing`, or `voice_error_pending` is blocked.
+- Preview is blocked while a composer is open, recording, transcribing, or voice error is pending.
+- While a composer is open, code-buffer Review Mode actions notify: `Submit or cancel the comment composer first.`
+- While voice error is pending, only retry, discard, cancel composer, and quit are allowed.
+- During recording and transcribing, add-reference, edit-comment, Review switching, and preview are blocked.
 
 ## Project root and paths
 
@@ -429,8 +414,9 @@ Comment rules:
 
 - Comments have invisible IDs and no user-facing names.
 - A complete Comment has at least one File Reference and non-empty trimmed body.
-- Incomplete Comments persist but block preview.
-- Users cannot create another Comment while a Comment is open.
+- Normal creation and editing flows persist only complete Comments.
+- Preview validation still treats incomplete persisted Comments as invalid defensive data and blocks preview.
+- Users cannot create or edit another Comment while a composer is open.
 - Deleting the current Comment selects the next Comment by newest-first order.
 
 ## File References
@@ -451,17 +437,17 @@ Creation rules:
 - Ranges are one-based and inclusive.
 - Charwise and blockwise precision are non-goals.
 - Creation requires a saved, unmodified normal file buffer inside the locked root.
-- If no Comment is open, add-reference creates a Comment and attaches the reference.
-- If a Comment is open, add-reference attaches to that Comment.
+- `<leader>ra` creates a new composer with the selected range as its first draft reference.
+- `<leader>rr` opens a Comment picker and appends the selected range to the chosen persisted Comment.
 - The snapshot is captured from buffer lines at creation time.
 
 Stale repair is manual:
 
-1. Open the Comment.
-2. Navigate to the stale File Reference.
-3. Delete it.
+1. Open the Comment picker.
+2. Edit the stale Comment in the composer.
+3. Delete the stale draft File Reference from the composer.
 4. Select the corrected line range.
-5. Add a new File Reference.
+5. Append or recreate the File Reference.
 
 MVP does not auto-shift, update, or repair references.
 
@@ -556,36 +542,41 @@ Behavior:
 - Legend remains fixed while the overview scrolls or re-renders.
 - If closed, recreate on next render, Review action, or `BufEnter` while Review Mode remains active.
 
-## Comment Body Editor
+## Comment Composer
 
-The edit-comment action opens a lightweight floating scratch editor for the current Comment body.
+The composer is the primary create/edit surface for Comments. It uses `Snacks.win` with a compact floating scratch buffer and starts in Normal mode.
 
 Buffer options:
 
-- `buftype=acwrite`
+- `buftype=nofile`
 - `buflisted=false`
 - `bufhidden=wipe`
 - plugin-owned scratch name
 
 Behavior:
 
-- Manual editing replaces the entire Comment body.
-- Voice transcription appends to the existing body and does not use this editor.
-- `:w` saves body text, clears modified flag, and keeps the editor open.
-- `:wq` saves if needed and closes.
-- `:q` closes if clean; if dirty, prompt discard/cancel.
-- `:q!` discards and closes.
-- Optional editor-local `<C-s>` may save.
+- Composer text edits update draft body text, not persisted Review data.
+- The top reference header is not user-editable body text.
+- Normal `<CR>` submits the draft. Insert-mode `<CR>` inserts a newline.
+- Normal `q` and Normal `<Esc>` cancel.
+- Normal `<Space>` toggles voice recording. Insert-mode Space inserts a space.
+- Normal `d` on a reference row confirms and removes that draft reference.
+- Submit refuses zero references or empty trimmed body and keeps the composer open.
+- Canceling a new composer creates no Comment.
+- Canceling an edit composer leaves the persisted Comment unchanged.
+- Voice transcript inserts at the current cursor position in the draft body.
+- Retryable voice errors stay in the composer with draft text preserved.
 
-On save:
+On submit:
 
-- Copy editor buffer lines into the Comment body.
+- Copy draft buffer body lines into the Comment body.
+- Copy draft references into the Comment.
 - Preserve user-entered newlines.
 - Update Comment and parent Review timestamps.
 - Persist Review data.
 - Do not write to disk.
 
-Quit while the editor is dirty discards transient editor state without saving.
+Composer draft references should be highlighted while the composer is open and cleared on cancel. Submit converts draft references into normal persisted highlights.
 
 ## Preview
 
@@ -608,7 +599,7 @@ Preview is blocked if:
 - any Comment is incomplete;
 - any File Reference is stale;
 - there are zero complete Comments;
-- a body editor is open;
+- a composer is open;
 - voice is recording/transcribing; or
 - voice error is pending.
 
@@ -668,14 +659,14 @@ Codex auth token expired, please run codex login.
 
 ### Flow
 
-1. First voice action starts recording for the current Comment.
-2. Sidebar shows recording state.
-3. Second voice action stops recording.
-4. Sidebar shows transcribing state.
-5. Successful transcription appends text to the current Comment body.
-6. Failed transcription shows retry/discard.
+1. Normal `<Space>` in the composer starts recording for the active draft.
+2. Sidebar and composer show recording state.
+3. Normal `<Space>` stops recording.
+4. Sidebar and composer show transcribing state.
+5. Successful transcription inserts text at the composer cursor.
+6. Failed transcription shows retry/discard inside the composer.
 7. Retry reuses the same temp audio.
-8. Discard deletes temp audio and returns to `comment_open`.
+8. Discard deletes temp audio and returns to the composer.
 
 Limits:
 
@@ -1002,7 +993,7 @@ Lua tests use Plenary and must cover:
 - no bare-key defaults;
 - optional `which-key.nvim` behavior;
 - sidebar creation/recreation;
-- body editor save/discard;
+- composer submit/cancel, draft reference deletion, and validation;
 - extmarks remaining display-only;
 - Windows path normalization;
 - storage permission failure;

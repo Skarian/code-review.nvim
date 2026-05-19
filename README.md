@@ -6,7 +6,7 @@ It lets you collect short code review comments while staying in code buffers:
 
 - create project-scoped Reviews;
 - attach exact linewise File References from visual selections;
-- write Comment bodies manually or by voice;
+- compose complete Comments manually or by voice;
 - see references highlighted in the current buffer;
 - detect stale references; and
 - open an editable plain-text preview for handoff to an agent or another workflow.
@@ -72,19 +72,16 @@ By default, `<leader>r` is only a parent namespace for which-key and child mappi
 
 | Mapping | Action |
 | --- | --- |
-| `<leader>rr` | Start Review Mode if needed, then open the Review picker. |
-| `<leader>rn` | Create a new Comment. |
-| `<leader>ra` | Add visual selection as a File Reference. |
-| `<leader>rc` | Edit current Comment body. |
-| `<leader>rs` | Start/stop voice transcription. |
-| `<leader>rj` | Next Comment or File Reference. |
-| `<leader>rk` | Previous Comment or File Reference. |
-| `<leader>ro` | Open current Comment or jump to current File Reference. |
-| `<leader>rx` | Delete current File Reference. |
-| `<leader>rd` | Delete current Comment. |
-| `<leader>rb` | Close current Comment. |
+| `<leader>ra` | From Visual mode, create a new Comment from the selected lines and open the composer. |
+| `<leader>rr` | From Visual mode, append the selected lines to an existing Comment through the Comment picker. |
+| `<leader>re` | Open the Comment picker for edit, delete, or jump actions. |
+| `<leader>rR` | Start Review Mode if needed, then open the Review picker. |
 | `<leader>rp` | Open preview. |
 | `<leader>rq` | Exit Review Mode. |
+
+The Comment composer is a Snacks-powered floating scratch buffer. It starts in Normal mode. Use normal Vim insert commands to write text, Normal `<CR>` to submit, and Normal `q` or `<Esc>` to cancel. Normal `<Space>` starts or stops voice recording inside the composer; Insert-mode Space remains normal text.
+
+New Comments are persisted only after submit succeeds. Submit requires at least one File Reference and non-empty body text. Canceling a new composer creates nothing.
 
 Configure or disable mappings:
 
@@ -92,7 +89,7 @@ Configure or disable mappings:
 require("code-review").setup({
   keymaps = {
     prefix = "<leader>r",
-    toggle_voice = false,
+    edit_comment = false,
   },
 })
 ```
@@ -147,7 +144,7 @@ Automated tests use mock auth, mock audio, and mock HTTP only.
 | Voice helper missing | Run `:Lazy build code-review.nvim` or `npm ci --prefix voice && npm run build --prefix voice`. |
 | Codex auth missing/expired | Run `codex login`. |
 | Audio provider unavailable | Rebuild the voice helper and confirm the platform is supported. On macOS, the helper can fall back to `ffmpeg`/AVFoundation if Decibri cannot open the default microphone. |
-| Preview blocked | Complete incomplete Comments and update or delete stale File References. |
+| Preview blocked | Submit or delete incomplete draft work and update or delete stale File References. |
 
 ## Tests
 
