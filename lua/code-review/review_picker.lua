@@ -31,7 +31,7 @@ function M.adapter.pick_review(reviews, callbacks)
 end
 
 function M.adapter.input_review_name(callback, cancel)
-  vim.ui.input({ prompt = "Review name: " }, function(value)
+  vim.ui.input({ prompt = "New Review Name: " }, function(value)
     if value and vim.trim(value) ~= "" then
       callback(value)
     elseif cancel then
