@@ -104,11 +104,11 @@ actions.preview()
 assert(state.mode() ~= "preview", "preview should be blocked while the composer is open")
 assert_contains(last_notification(), "composer", "missing composer notification")
 
-vim.api.nvim_buf_set_lines(state.get().composer.buf, state.get().composer.body_start, -1, false, { "Check this calculation." })
+vim.api.nvim_buf_set_lines(state.get().composer.body_buf, 0, -1, false, { "Check this calculation." })
 require("code-review.composer").submit()
 s = state.get()
 review = model.find_review(s.store, s.active_review_id)
-local comment = model.find_comment(review, s.current_comment_id)
+local comment = review.comments[1]
 assert(comment and #comment.file_references == 1, "submitted Comment was not persisted")
 
 actions.preview()

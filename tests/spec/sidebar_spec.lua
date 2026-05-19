@@ -51,7 +51,7 @@ describe("sidebar", function()
     vim.fn.setpos("'>", { 0, 1, 1, 0 })
     actions.add_reference()
     local state = require("code-review.state")
-    vim.api.nvim_buf_set_lines(state.get().composer.buf, state.get().composer.body_start, -1, false, { "ready" })
+    vim.api.nvim_buf_set_lines(state.get().composer.body_buf, 0, -1, false, { "ready" })
     require("code-review.composer").submit()
     assert_sidebar_count(1)
 
@@ -132,7 +132,6 @@ describe("sidebar", function()
     assert.truthy(lines[height - 1]:find("re edit", 1, true))
     assert.is_true(lines[height - 3]:find("%-%-") ~= nil)
     assert.truthy(vim.api.nvim_get_hl(0, { name = "CodeReviewSidebarHeader" }).bold)
-    assert.truthy(vim.api.nvim_get_hl(0, { name = "CodeReviewSidebarCurrent" }))
     assert.truthy(vim.api.nvim_get_hl(0, { name = "CodeReviewSidebarIncomplete" }))
     assert.truthy(vim.api.nvim_get_hl(0, { name = "CodeReviewSidebarStale" }))
     assert.is_false(vim.wo[sidebar.win].number)
@@ -143,7 +142,7 @@ describe("sidebar", function()
     code_review.quit()
   end)
 
-  it("keeps the current comment visible when the sidebar is truncated", function()
+  it("renders newest sidebar comments first when truncated", function()
     local code_review = require("code-review")
     local config = require("code-review.config")
     local actions = require("code-review.actions")
@@ -157,17 +156,14 @@ describe("sidebar", function()
     code_review.start()
     actions.create_review("Sidebar")
     local review = model.find_review(state.get().store, state.get().active_review_id)
-    local current
     for i = 1, 30 do
-      local comment = model.new_comment()
+      local comment = model.new_comment(string.format("2026-05-18T00:00:%02dZ", i))
       comment.body = "comment-" .. i
       table.insert(review.comments, comment)
-      current = comment
     end
-    state.get().current_comment_id = current.id
     require("code-review.sidebar").render()
     local lines = table.concat(vim.api.nvim_buf_get_lines(state.get().sidebar.buf, 0, -1, false), "\n")
-    assert.truthy(lines:find("  > ", 1, true))
+    assert.falsy(lines:find("  > ", 1, true))
     assert.truthy(lines:find("comment%-30"))
     code_review.quit()
   end)
@@ -199,7 +195,6 @@ describe("sidebar", function()
       },
     }
     table.insert(review.comments, comment)
-    state.get().current_comment_id = comment.id
     require("code-review.sidebar").render()
 
     local sidebar = state.get().sidebar

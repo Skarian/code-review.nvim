@@ -23,6 +23,14 @@ describe("comment composer", function()
     return table.concat(vim.api.nvim_buf_get_lines(composer.buf, 0, -1, false), "\n")
   end
 
+  local function status_text(composer)
+    return table.concat(vim.api.nvim_buf_get_lines(composer.status_buf, 0, -1, false), "\n")
+  end
+
+  local function refs_text(composer)
+    return table.concat(vim.api.nvim_buf_get_lines(composer.refs_buf, 0, -1, false), "\n")
+  end
+
   it("accepts Snacks.win when it is a callable table", function()
     local previous = package.loaded.snacks
     local called = false
@@ -76,14 +84,18 @@ describe("comment composer", function()
     code_review.quit()
   end)
 
-  it("shows protected compact instructions and voice status", function()
+  it("opens a stacked composer focused on a body-only comment buffer", function()
     local code_review, actions, state = start_project()
     require("code-review.config").setup({ voice = { enabled = false } })
     select_lines(actions, 1, 1)
-    local text = composer_text(state.get().composer)
-    assert.truthy(text:find("Keys: <CR> submit | q/<Esc> cancel | d delete ref | ? help", 1, true))
-    assert.truthy(text:find("Voice: unavailable", 1, true))
-    vim.api.nvim_buf_set_lines(state.get().composer.buf, state.get().composer.body_start, -1, false, { "body" })
+    local composer = state.get().composer
+    assert.equals(composer.body_buf, vim.api.nvim_get_current_buf())
+    assert.equals(composer.body_win, vim.api.nvim_get_current_win())
+    assert.equals("", composer_text(composer))
+    assert.truthy(status_text(composer):find("Tab switch panels", 1, true))
+    assert.truthy(status_text(composer):find("Voice: unavailable", 1, true))
+    assert.truthy(refs_text(composer):find("x.lua:1-1", 1, true))
+    vim.api.nvim_buf_set_lines(composer.body_buf, 0, -1, false, { "body" })
     require("code-review.composer").submit()
     local review = require("code-review.model").find_review(state.get().store, state.get().active_review_id)
     assert.equals("body", review.comments[1].body)
@@ -93,7 +105,7 @@ describe("comment composer", function()
   it("submits a complete comment from the selected reference and body", function()
     local code_review, actions, state, model = start_project()
     select_lines(actions, 2, 3)
-    vim.api.nvim_buf_set_lines(state.get().composer.buf, state.get().composer.body_start, -1, false, { "body", "more" })
+    vim.api.nvim_buf_set_lines(state.get().composer.body_buf, 0, -1, false, { "body", "more" })
     require("code-review.composer").submit()
     local review = model.find_review(state.get().store, state.get().active_review_id)
     local comment = review.comments[1]
@@ -114,7 +126,7 @@ describe("comment composer", function()
     assert.is_true(vim.api.nvim_buf_is_valid(buf))
     local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
     assert.truthy(text:find("Composer keys", 1, true))
-    assert.truthy(text:find("<Space> starts recording", 1, true))
+    assert.truthy(text:find("Space starts recording", 1, true))
     local maps = vim.api.nvim_buf_get_keymap(buf, "n")
     local seen_q, seen_esc = false, false
     for _, map in ipairs(maps) do
@@ -134,11 +146,48 @@ describe("comment composer", function()
     code_review.quit()
   end)
 
+  it("cycles focus between references and body while skipping status", function()
+    local code_review, actions, state = start_project()
+    select_lines(actions, 1, 1)
+    local composer = state.get().composer
+    assert.equals(composer.body_win, vim.api.nvim_get_current_win())
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Tab>", true, false, true), "x", false)
+    assert.equals(composer.refs_win, vim.api.nvim_get_current_win())
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Tab>", true, false, true), "x", false)
+    assert.equals(composer.body_win, vim.api.nvim_get_current_win())
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<S-Tab>", true, false, true), "x", false)
+    assert.equals(composer.refs_win, vim.api.nvim_get_current_win())
+    assert.is_false(composer.status_win == vim.api.nvim_get_current_win())
+    require("code-review.composer").cancel()
+    code_review.quit()
+  end)
+
+  it("opens reference actions from enter and can go to the selected reference", function()
+    local code_review, actions, state = start_project({ "one", "two", "three" })
+    select_lines(actions, 2, 2)
+    local composer = state.get().composer
+    require("code-review.composer").focus_references()
+    vim.api.nvim_win_set_cursor(composer.refs_win, { 1, 0 })
+    local old_select = vim.ui.select
+    vim.ui.select = function(items, _, cb)
+      assert.same({ "Delete", "Go to" }, items)
+      cb("Go to")
+    end
+    require("code-review.composer").reference_action()
+    vim.ui.select = old_select
+    assert.equals(2, vim.api.nvim_win_get_cursor(composer.source_win)[1])
+    assert.equals("composer", state.mode())
+    assert.truthy(state.get().composer)
+    require("code-review.composer").cancel()
+    code_review.quit()
+  end)
+
   it("deletes draft references from reference rows only after confirmation", function()
     local code_review, actions, state = start_project()
     select_lines(actions, 1, 1)
     local composer = state.get().composer
-    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+    require("code-review.composer").focus_references()
+    vim.api.nvim_win_set_cursor(composer.refs_win, { 1, 0 })
     local old_select = vim.ui.select
     vim.ui.select = function(_, _, cb)
       cb("Delete")
@@ -156,10 +205,14 @@ describe("comment composer", function()
     local code_review, actions, state = start_project()
     select_lines(actions, 1, 1)
     local buf = state.get().composer.buf
+    local status_buf = state.get().composer.status_buf
+    local refs_buf = state.get().composer.refs_buf
     code_review.quit()
     assert.is_false(code_review.is_active())
     assert.equals(nil, state.get().composer)
     assert.is_false(vim.api.nvim_buf_is_valid(buf))
+    assert.is_false(vim.api.nvim_buf_is_valid(status_buf))
+    assert.is_false(vim.api.nvim_buf_is_valid(refs_buf))
   end)
 
   it("inserts voice transcripts at the composer cursor", function()
@@ -172,8 +225,8 @@ describe("comment composer", function()
     config.setup({ storage = { dir = project .. "/store" }, voice = { helper_path = helper } })
     select_lines(actions, 1, 1)
     local composer = state.get().composer
-    vim.api.nvim_buf_set_lines(composer.buf, composer.body_start, -1, false, { "start end" })
-    vim.api.nvim_win_set_cursor(composer.win, { composer.body_start + 1, 6 })
+    vim.api.nvim_buf_set_lines(composer.body_buf, 0, -1, false, { "start end" })
+    vim.api.nvim_win_set_cursor(composer.body_win, { 1, 6 })
     local old_record = process.record
     local old_transcribe = process.transcribe
     process.record = function(opts)
@@ -193,7 +246,7 @@ describe("comment composer", function()
     vim.wait(1000, function()
       return state.mode() == "composer" and state.get().voice == nil
     end)
-    local line = vim.api.nvim_buf_get_lines(composer.buf, composer.body_start, composer.body_start + 1, false)[1]
+    local line = vim.api.nvim_buf_get_lines(composer.body_buf, 0, 1, false)[1]
     assert.equals("start voiceend", line)
     process.record = old_record
     process.transcribe = old_transcribe
@@ -232,16 +285,16 @@ describe("comment composer", function()
     end
     require("code-review.voice").toggle()
     assert.truthy(record_opts)
-    assert.truthy(composer_text(composer):find("Voice: recording - <Space> stops", 1, true))
+    assert.truthy(status_text(composer):find("Recording: press Space to stop", 1, true))
     require("code-review.voice").toggle()
     assert.truthy(transcribe_opts)
-    assert.truthy(composer_text(composer):find("Voice: transcribing...", 1, true))
+    assert.truthy(status_text(composer):find("Transcribing audio...", 1, true))
     transcribe_opts.on_exit(1, { ok = false, code = "network_error", message = "temporary", retryable = true }, "")
     assert.equals("voice_error_pending", state.mode())
-    assert.truthy(composer_text(composer):find("Voice: failed - <Space> retries", 1, true))
+    assert.truthy(status_text(composer):find("Voice failed: press Space to retry", 1, true))
     require("code-review.voice").discard()
     assert.equals("composer", state.mode())
-    assert.truthy(composer_text(composer):find("Voice: <Space> record", 1, true))
+    assert.truthy(status_text(composer):find("Voice ready: press Space to record", 1, true))
     process.record = old_record
     process.transcribe = old_transcribe
     require("code-review.composer").cancel()
@@ -257,7 +310,7 @@ describe("comment composer", function()
     vim.fn.writefile({ "" }, helper)
     config.setup({ storage = { dir = project .. "/store" }, voice = { helper_path = helper, transcription_timeout_ms = 55 } })
     select_lines(actions, 1, 1)
-    vim.api.nvim_buf_set_lines(state.get().composer.buf, state.get().composer.body_start, -1, false, { "draft" })
+    vim.api.nvim_buf_set_lines(state.get().composer.body_buf, 0, -1, false, { "draft" })
     local old_record = process.record
     local old_transcribe = process.transcribe
     local seen_timeout

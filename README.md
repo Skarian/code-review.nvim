@@ -79,7 +79,7 @@ By default, `<leader>r` is only a parent namespace for which-key and child mappi
 | `<leader>rp` | Open preview. |
 | `<leader>rq` | Exit Review Mode. |
 
-The Comment composer is a Snacks-powered floating scratch buffer. It starts in Normal mode and shows a protected header with compact key instructions and voice status. Use normal Vim insert commands to write text, Normal `<CR>` to submit, and Normal `q` or `<Esc>` to cancel. Normal `<Space>` starts or stops voice recording inside the composer; Insert-mode Space remains normal text. Normal `?` opens compact composer help.
+The Comment composer is a stacked floating layout with a read-only status panel, a focusable read-only File References panel, and an editable comment buffer. Initial focus goes to the comment buffer, which contains only the comment body and uses normal Vim editing. `<Tab>` and `<S-Tab>` move between references and the comment body. Normal `<CR>` submits from the comment buffer; `<CR>` on a reference opens Delete / Go to actions; `d` on a reference confirms deletion. Normal `<Space>` starts or stops voice recording inside the composer; Insert-mode Space remains normal text. Normal `?` opens compact composer help.
 
 New Comments are persisted only after submit succeeds. Submit requires at least one File Reference and non-empty body text. Canceling a new composer creates nothing.
 

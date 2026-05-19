@@ -17,7 +17,7 @@ The MVP supports:
 - project-scoped Reviews that persist locally;
 - Comments with one body and one or more exact line references;
 - linewise visual selection capture;
-- Snacks-powered Comment composer flow;
+- stacked floating Comment composer flow;
 - voice transcription through a bundled Node/TypeScript helper;
 - stale-reference detection;
 - current-buffer highlights; and
@@ -65,10 +65,8 @@ The workflow is code-buffer-first. The sidebar is a persistent overview and stat
 - **Review**: a named, durable collection of Comments scoped to one project root.
 - **Comment**: one review note. It has one body and one or more File References. Persisted Comments are complete by construction: at least one File Reference and non-empty body text after trimming whitespace.
 - **File Reference**: an exact linewise reference to one saved file inside the locked project root. It stores relative path, one-based inclusive start/end lines, and the selected line snapshot.
-- **Selected Comment**: the active persisted Comment for sidebar highlighting, picker jump targets, or edit/delete actions.
-- **Current File Reference**: the active File Reference inside an open Comment.
 - **Sidebar**: a persistent read-only right split shown while Review Mode is active.
-- **Comment Composer**: a Snacks-powered floating scratch buffer for creating or editing complete Comments. It owns draft body text, draft references, validation, and local voice state until submit or cancel.
+- **Comment Composer**: a stacked floating layout for creating or editing complete Comments. It owns draft body text, draft references, validation, and local voice state until submit or cancel.
 - **Preview**: an editable scratch buffer opened in the current window. It is regenerated from Review data and is never persisted by the plugin.
 - **Stale File Reference**: a File Reference whose file is missing, range is invalid for current contents, current lines differ from the snapshot, or the reference cannot be checked safely.
 
@@ -233,7 +231,7 @@ Rules:
 - Actions other than `review_picker` require Review Mode to be active and notify without side effects when inactive.
 - Default mappings must not make `<leader>r` itself wait for a shorter conflicting mapping, because `<leader>r` is not mapped by the plugin.
 - Default child mappings are installed at setup time so `<leader>rR` can start Review Mode from inactive state.
-- Do not map terminal, help, prompt, quickfix, sidebar, preview, or comment editor buffers except for buffer-specific UI behavior.
+- Do not map terminal, help, prompt, quickfix, sidebar, preview, or composer buffers except for buffer-specific UI behavior.
 - Visual add-reference must capture visual marks before leaving visual mode.
 - Optional `which-key.nvim` registration must be idempotent and must not warn when absent.
 - Optional `which-key.nvim` registration uses `keymaps.prefix` as the `Code Review` group and registers child action labels below it.
@@ -263,7 +261,7 @@ Core transitions:
 - Voice start/stop from the composer transitions through `recording`, `transcribing`, and either back to `composer` or to `voice_error_pending`.
 - Opening Preview enters `preview` if validation passes.
 - Closing Preview restores the previous Review Mode state if Review Mode is still active.
-- Quit from any active state stops helper processes, discards transient editor/audio/preview state, closes UI, persists durable data, and returns to `inactive`.
+- Quit from any active state stops helper processes, discards transient composer/audio/preview state, closes UI, persists durable data, and returns to `inactive`.
 
 Guards:
 
@@ -417,7 +415,7 @@ Comment rules:
 - Normal creation and editing flows persist only complete Comments.
 - Preview validation still treats incomplete persisted Comments as invalid defensive data and blocks preview.
 - Users cannot create or edit another Comment while a composer is open.
-- Deleting the current Comment selects the next Comment by newest-first order.
+- Deleting a Comment removes it from the active Review without selecting another Comment.
 
 ## File References
 
@@ -498,7 +496,6 @@ While Review Mode is active, the current buffer highlights all File References i
 Requirements:
 
 - Use extmarks with line highlights.
-- Stronger highlight for Current Comment and Current File Reference.
 - Distinct highlight for stale references.
 - No virtual text for MVP.
 - Extmarks are display-only. Extmark movement must never update stored File Reference ranges.
@@ -507,10 +504,9 @@ Requirements:
 Highlight groups:
 
 - `CodeReviewReference`
-- `CodeReviewCurrentReference`
+- `CodeReviewDraftReference`
 - `CodeReviewStaleReference`
 - `CodeReviewSidebarHeader`
-- `CodeReviewSidebarCurrent`
 - `CodeReviewSidebarIncomplete`
 - `CodeReviewSidebarStale`
 - `CodeReviewStatus`
@@ -538,15 +534,14 @@ Behavior:
 - Receives no Review Mode action mappings.
 - Stores no durable data.
 - Rendering is derived from current state and durable Review data.
-- Current Comment should remain visible near top or center.
 - Legend remains fixed while the overview scrolls or re-renders.
 - If closed, recreate on next render, Review action, or `BufEnter` while Review Mode remains active.
 
 ## Comment Composer
 
-The composer is the primary create/edit surface for Comments. It uses `Snacks.win` with a compact floating scratch buffer and starts in Normal mode. It shows protected compact key instructions, inline voice status, and a `?` hint for expanded help above the editable body.
+The composer is the primary create/edit surface for Comments. It uses a stacked floating layout with a read-only status panel, a focusable read-only File References panel, and an editable comment buffer. Initial focus goes to the comment buffer. The comment buffer contains only body text; references, help, validation, and voice state are UI outside the editable body.
 
-Buffer options:
+Composer buffer options:
 
 - `buftype=nofile`
 - `buflisted=false`
@@ -556,11 +551,14 @@ Buffer options:
 Behavior:
 
 - Composer text edits update draft body text, not persisted Review data.
-- The top reference header is not user-editable body text.
-- Normal `<CR>` submits the draft. Insert-mode `<CR>` inserts a newline.
-- Normal `q` and Normal `<Esc>` cancel.
+- The status panel is not part of tab cycling.
+- `<Tab>` and `<S-Tab>` cycle between the references panel and comment buffer.
+- Normal `<CR>` submits the draft from the comment buffer. Insert-mode `<CR>` inserts a newline.
+- Normal `<CR>` on a draft File Reference opens a picker with `Delete` and `Go to`.
+- Normal `d` on a draft File Reference confirms and removes that draft reference.
+- `Go to` jumps the source window to that File Reference while keeping the composer active.
+- Normal `q` and Normal `<Esc>` cancel from composer sections.
 - Normal `<Space>` toggles voice recording. Insert-mode Space inserts a space.
-- Normal `d` on a reference row confirms and removes that draft reference.
 - Normal `?` opens compact read-only composer help; `q` and `<Esc>` close help without canceling the composer.
 - Submit refuses zero references or empty trimmed body and keeps the composer open.
 - Canceling a new composer creates no Comment.
