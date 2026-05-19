@@ -109,8 +109,8 @@ function M.start()
     return
   end
   state.activate(project_root, handle.root_hash, handle.store, handle)
-  create_augroup()
   require("code-review.sidebar").render()
+  create_augroup()
   require("code-review.highlights").refresh()
   if handle.store.last_active_review_id then
     state.set_mode("comment_list")
@@ -126,15 +126,16 @@ function M.quit()
   local s = state.get()
   pcall(require("code-review.voice").stop)
   storage.flush(s.storage)
+  if s.augroup then
+    pcall(vim.api.nvim_del_augroup_by_id, s.augroup)
+    s.augroup = nil
+  end
+  require("code-review.sidebar").close()
   require("code-review.preview").close()
   if s.editor and s.editor.buf and vim.api.nvim_buf_is_valid(s.editor.buf) then
     pcall(vim.api.nvim_buf_delete, s.editor.buf, { force = true })
   end
   require("code-review.highlights").clear_all()
-  require("code-review.sidebar").close()
-  if s.augroup then
-    pcall(vim.api.nvim_del_augroup_by_id, s.augroup)
-  end
   if s.stale_timer and not s.stale_timer:is_closing() then
     s.stale_timer:stop()
     s.stale_timer:close()
