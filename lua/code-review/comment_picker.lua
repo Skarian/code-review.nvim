@@ -60,11 +60,12 @@ function M.adapter.pick_comments(items, callbacks)
   ui.pick_comments(items, callbacks)
 end
 
-local function delete_comment(comment)
+local function delete_comment(comment, after_delete)
   local review = active_review()
   if not review then
     return
   end
+  local deleted = false
   vim.ui.select({ "Delete", "Cancel" }, { prompt = "Delete Comment?" }, function(choice)
     if choice ~= "Delete" then
       return
@@ -72,11 +73,18 @@ local function delete_comment(comment)
     for index, item in ipairs(review.comments) do
       if item.id == comment.id then
         table.remove(review.comments, index)
+        deleted = true
         break
       end
     end
+    if not deleted then
+      return
+    end
     model.touch_review(review)
     persist()
+    if after_delete then
+      after_delete(comment.id)
+    end
   end)
 end
 
@@ -116,6 +124,36 @@ local function open_comment_editor(comment)
   end)
 end
 
+local function reopen_after_delete(opts)
+  return function(deleted_id)
+    vim.schedule(function()
+      if not state.is_active() or state.get().composer then
+        return
+      end
+      local review = active_review()
+      if not review or #(review.comments or {}) == 0 then
+        state.set_mode("comment_list")
+        return
+      end
+      if opts.comments then
+        local remaining = {}
+        for _, comment in ipairs(opts.comments) do
+          if comment.id ~= deleted_id and model.find_comment(review, comment.id) then
+            remaining[#remaining + 1] = comment
+          end
+        end
+        if #remaining == 0 then
+          state.set_mode("comment_list")
+          return
+        end
+        M.open(vim.tbl_extend("force", opts, { comments = remaining }))
+        return
+      end
+      M.open(opts)
+    end)
+  end
+end
+
 function M.open(opts)
   opts = opts or {}
   local review = active_review()
@@ -137,7 +175,7 @@ function M.open(opts)
       end
     end,
     delete = function(item)
-      delete_comment(item.comment)
+      delete_comment(item.comment, reopen_after_delete(opts))
     end,
     jump = function(item)
       jump_to_comment(item.comment)

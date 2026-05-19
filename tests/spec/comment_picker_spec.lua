@@ -96,17 +96,29 @@ describe("comment picker", function()
     local picker = require("code-review.comment_picker")
     local old_pick = picker.adapter.pick_comments
     local old_select = vim.ui.select
+    local pick_count = 0
     picker.adapter.pick_comments = function(items, callbacks)
-      callbacks.jump(items[1])
-      assert.equals(3, vim.api.nvim_win_get_cursor(0)[1])
-      vim.ui.select = function(_, _, cb)
-        cb("Delete")
+      pick_count = pick_count + 1
+      if pick_count == 1 then
+        callbacks.jump(items[1])
+        assert.equals(3, vim.api.nvim_win_get_cursor(0)[1])
+        vim.ui.select = function(_, _, cb)
+          cb("Delete")
+        end
+        callbacks.delete(items[1])
+      else
+        assert.equals(1, #items)
+        assert.equals(first.id, items[1].comment.id)
+        callbacks.cancel()
       end
-      callbacks.delete(items[1])
     end
     picker.open()
+    vim.wait(100, function()
+      return pick_count == 2
+    end)
     picker.adapter.pick_comments = old_pick
     vim.ui.select = old_select
+    assert.equals(2, pick_count)
     assert.equals(1, #review.comments)
     assert.equals(first.id, review.comments[1].id)
     code_review.quit()
