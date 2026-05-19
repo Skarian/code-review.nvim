@@ -86,4 +86,85 @@ describe("comment composer", function()
     assert.equals(nil, state.get().composer)
     assert.is_false(vim.api.nvim_buf_is_valid(buf))
   end)
+
+  it("inserts voice transcripts at the composer cursor", function()
+    local code_review, actions, state = start_project()
+    local config = require("code-review.config")
+    local process = require("code-review.voice.process")
+    local project = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":h")
+    local helper = project .. "/helper.js"
+    vim.fn.writefile({ "" }, helper)
+    config.setup({ storage = { dir = project .. "/store" }, voice = { helper_path = helper } })
+    select_lines(actions, 1, 1)
+    local composer = state.get().composer
+    vim.api.nvim_buf_set_lines(composer.buf, composer.body_start, -1, false, { "start end" })
+    vim.api.nvim_win_set_cursor(composer.win, { composer.body_start + 1, 6 })
+    local old_record = process.record
+    local old_transcribe = process.transcribe
+    process.record = function(opts)
+      vim.fn.writefile({ "wav" }, opts.out)
+      vim.schedule(function()
+        opts.on_exit(0, { ok = true, event = "recording_stopped", durationMillis = 1000, audioBytes = 3 }, "")
+      end)
+      return { stop = function() end, discard = function() end, kill = function() end }
+    end
+    process.transcribe = function(opts)
+      vim.schedule(function()
+        opts.on_exit(0, { ok = true, text = "voice " }, "")
+      end)
+      return { kill = function() end }
+    end
+    require("code-review.voice").toggle()
+    vim.wait(1000, function()
+      return state.mode() == "composer" and state.get().voice == nil
+    end)
+    local line = vim.api.nvim_buf_get_lines(composer.buf, composer.body_start, composer.body_start + 1, false)[1]
+    assert.equals("start voiceend", line)
+    process.record = old_record
+    process.transcribe = old_transcribe
+    require("code-review.composer").cancel()
+    code_review.quit()
+  end)
+
+  it("keeps retryable voice errors inside the composer", function()
+    local code_review, actions, state = start_project()
+    local config = require("code-review.config")
+    local process = require("code-review.voice.process")
+    local project = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":h")
+    local helper = project .. "/helper.js"
+    vim.fn.writefile({ "" }, helper)
+    config.setup({ storage = { dir = project .. "/store" }, voice = { helper_path = helper, transcription_timeout_ms = 55 } })
+    select_lines(actions, 1, 1)
+    vim.api.nvim_buf_set_lines(state.get().composer.buf, state.get().composer.body_start, -1, false, { "draft" })
+    local old_record = process.record
+    local old_transcribe = process.transcribe
+    local seen_timeout
+    process.record = function(opts)
+      vim.fn.writefile({ "wav" }, opts.out)
+      vim.schedule(function()
+        opts.on_exit(0, { ok = true, event = "recording_stopped", durationMillis = 1000, audioBytes = 3 }, "")
+      end)
+      return { stop = function() end, discard = function() end, kill = function() end }
+    end
+    process.transcribe = function(opts)
+      seen_timeout = opts.timeout_ms
+      vim.schedule(function()
+        opts.on_exit(1, { ok = false, code = "network_error", message = "temporary", retryable = true }, "")
+      end)
+      return { kill = function() end }
+    end
+    require("code-review.voice").toggle()
+    vim.wait(1000, function()
+      return state.mode() == "voice_error_pending"
+    end)
+    assert.equals(55, seen_timeout)
+    assert.truthy(state.get().composer)
+    assert.truthy(state.get().voice and state.get().voice.audio_path)
+    require("code-review.voice").discard()
+    assert.equals("composer", state.mode())
+    process.record = old_record
+    process.transcribe = old_transcribe
+    require("code-review.composer").cancel()
+    code_review.quit()
+  end)
 end)

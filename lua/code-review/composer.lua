@@ -61,6 +61,9 @@ local function clear_composer(delete_buf)
   if not composer then
     return
   end
+  if s.voice then
+    pcall(require("code-review.voice").stop)
+  end
   close_window(composer)
   if delete_buf and composer.buf and vim.api.nvim_buf_is_valid(composer.buf) then
     pcall(vim.api.nvim_buf_delete, composer.buf, { force = true })
@@ -117,6 +120,9 @@ local function apply_keymaps(buf)
   vim.keymap.set("n", "d", function()
     require("code-review.composer").delete_reference_under_cursor()
   end, { buffer = buf, nowait = true, desc = "Delete draft File Reference" })
+  vim.keymap.set("n", "<Space>", function()
+    require("code-review.voice").toggle()
+  end, { buffer = buf, nowait = true, desc = "Toggle Code Review voice" })
 end
 
 local function open(opts)
@@ -233,6 +239,34 @@ function M.delete_reference_under_cursor()
     set_lines(composer, body)
     refresh_draft_highlights()
   end)
+end
+
+function M.insert_text(text)
+  local composer = state.get().composer
+  if not composer or not vim.api.nvim_buf_is_valid(composer.buf) then
+    return false
+  end
+  text = vim.trim(text or "")
+  if text == "" then
+    return true
+  end
+  local win = composer.win and vim.api.nvim_win_is_valid(composer.win) and composer.win or nil
+  local row, col
+  if win then
+    local cursor = vim.api.nvim_win_get_cursor(win)
+    row = cursor[1] - 1
+    col = cursor[2]
+  else
+    row = vim.api.nvim_buf_line_count(composer.buf) - 1
+    col = #vim.api.nvim_buf_get_lines(composer.buf, row, row + 1, false)[1]
+  end
+  if row < composer.body_start then
+    row = composer.body_start
+    col = 0
+  end
+  local lines = vim.split(text, "\n", { plain = true })
+  vim.api.nvim_buf_set_text(composer.buf, row, col, row, col, lines)
+  return true
 end
 
 return M
