@@ -20,10 +20,6 @@ end
 
 function M.open()
   local s = state.get()
-  if s.mode ~= "comment_open" then
-    notify.warn("Open a comment before editing its body.")
-    return
-  end
   local review = model.find_review(s.store, s.active_review_id)
   local comment = model.find_comment(review, s.current_comment_id)
   if not comment then
@@ -98,7 +94,7 @@ function M.open()
       if current.editor and current.editor.buf == buf then
         current.editor = nil
         if current.active then
-          state.set_mode("comment_open")
+          state.set_mode("comment_list")
         end
       end
     end,

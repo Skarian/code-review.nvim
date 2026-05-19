@@ -22,7 +22,7 @@ local function current_buffer_allows_action(action)
     return false
   end
   if s.editor and s.editor.buf == bufnr then
-    notify.warn("Save or close the comment editor first.")
+    notify.warn("Submit or cancel the comment composer first.")
     return false
   end
   local bt = vim.bo[bufnr].buftype
@@ -47,8 +47,8 @@ end
 
 local function blocked_by_editor_or_voice()
   local mode = state.mode()
-  if mode == "body_editor_clean" or mode == "body_editor_dirty" then
-    notify.warn("Save or close the comment editor first.")
+  if mode == "body_editor_clean" or mode == "body_editor_dirty" or mode == "composer" then
+    notify.warn("Submit or cancel the comment composer first.")
     return true
   end
   if mode == "recording" or mode == "transcribing" or mode == "voice_error_pending" then
@@ -77,10 +77,6 @@ function M.create_review(name)
   if blocked_by_editor_or_voice() then
     return
   end
-  if state.mode() == "comment_open" then
-    notify.warn("Close current Comment before switching Reviews.")
-    return
-  end
   local s = state.get()
   local review = model.new_review(name)
   table.insert(s.store.reviews, review)
@@ -93,10 +89,6 @@ end
 
 function M.select_review(review_id)
   if not require_active() then
-    return
-  end
-  if state.mode() == "comment_open" then
-    notify.warn("Close current Comment before switching Reviews.")
     return
   end
   if blocked_by_editor_or_voice() then
@@ -163,7 +155,7 @@ local function ensure_comment()
   model.touch_review(review)
   s.current_comment_id = comment.id
   s.current_reference_index = 1
-  state.set_mode("comment_open")
+  state.set_mode("comment_list")
   return comment, review
 end
 
@@ -229,7 +221,7 @@ function M.add_reference()
   table.insert(comment.file_references, ref)
   s.current_comment_id = comment.id
   s.current_reference_index = #comment.file_references
-  state.set_mode("comment_open")
+  state.set_mode("comment_list")
   model.touch_comment(review, comment)
   persist()
 end
@@ -242,10 +234,6 @@ function M.new_comment()
     return
   end
   local s = state.get()
-  if s.current_comment_id and s.mode == "comment_open" then
-    notify.warn("Close current Comment before creating another.")
-    return
-  end
   local review = active_review()
   if not review then
     notify.warn("Create or select a Review first.")
@@ -255,7 +243,7 @@ function M.new_comment()
   table.insert(review.comments, comment)
   s.current_comment_id = comment.id
   s.current_reference_index = 1
-  state.set_mode("comment_open")
+  state.set_mode("comment_list")
   model.touch_review(review)
   persist()
 end
@@ -274,11 +262,7 @@ function M.open_picker()
     return
   end
   if state.mode() ~= "comment_list" and state.mode() ~= "review_picker" then
-    if state.mode() == "comment_open" then
-      notify.warn("Close current Comment before switching Reviews.")
-    else
-      notify.warn("Close current Review UI before switching Reviews.")
-    end
+    notify.warn("Close current Review UI before switching Reviews.")
     return
   end
   if state.is_active() and blocked_by_editor_or_voice() then
@@ -361,23 +345,17 @@ function M.next()
   if not review then
     return
   end
-  if s.mode == "comment_open" then
-    local comment = model.find_comment(review, s.current_comment_id)
-    if comment and #comment.file_references > 0 then
-      s.current_reference_index = math.min(#comment.file_references, s.current_reference_index + 1)
-    end
-  else
-    local comments = model.comments_newest(review)
-    for idx, comment in ipairs(comments) do
-      if comment.id == s.current_comment_id then
-        s.current_comment_id = (comments[idx + 1] or comments[1] or {}).id
-        break
-      end
-    end
-    if not s.current_comment_id and comments[1] then
-      s.current_comment_id = comments[1].id
+  local comments = model.comments_newest(review)
+  for idx, comment in ipairs(comments) do
+    if comment.id == s.current_comment_id then
+      s.current_comment_id = (comments[idx + 1] or comments[1] or {}).id
+      break
     end
   end
+  if not s.current_comment_id and comments[1] then
+    s.current_comment_id = comments[1].id
+  end
+  s.current_reference_index = 1
   require("code-review.sidebar").render()
   require("code-review.highlights").refresh()
 end
@@ -394,20 +372,17 @@ function M.previous()
   if not review then
     return
   end
-  if s.mode == "comment_open" then
-    s.current_reference_index = math.max(1, s.current_reference_index - 1)
-  else
-    local comments = model.comments_newest(review)
-    for idx, comment in ipairs(comments) do
-      if comment.id == s.current_comment_id then
-        s.current_comment_id = (comments[idx - 1] or comments[#comments] or {}).id
-        break
-      end
-    end
-    if not s.current_comment_id and comments[1] then
-      s.current_comment_id = comments[1].id
+  local comments = model.comments_newest(review)
+  for idx, comment in ipairs(comments) do
+    if comment.id == s.current_comment_id then
+      s.current_comment_id = (comments[idx - 1] or comments[#comments] or {}).id
+      break
     end
   end
+  if not s.current_comment_id and comments[1] then
+    s.current_comment_id = comments[1].id
+  end
+  s.current_reference_index = 1
   require("code-review.sidebar").render()
   require("code-review.highlights").refresh()
 end
@@ -424,11 +399,6 @@ function M.open_current()
   local comment = model.find_comment(review, s.current_comment_id)
   if not comment then
     notify.warn("No current Comment.")
-    return
-  end
-  if s.mode == "comment_list" then
-    state.set_mode("comment_open")
-    require("code-review.sidebar").render()
     return
   end
   local ref = comment.file_references[s.current_reference_index]

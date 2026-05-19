@@ -19,7 +19,7 @@ describe("editor and voice", function()
     require("code-review.editor").save()
     assert.equals("body_editor_clean", state.mode())
     require("code-review.editor").close(true)
-    assert.equals("comment_open", state.mode())
+    assert.equals("comment_list", state.mode())
     local review = model.find_review(state.get().store, state.get().active_review_id)
     local comment = model.find_comment(review, state.get().current_comment_id)
     assert.equals("body text", comment.body)
@@ -53,7 +53,7 @@ describe("editor and voice", function()
     vim.cmd("q!")
     vim.fn.confirm = old_confirm
     assert.is_false(prompted)
-    assert.equals("comment_open", state.mode())
+    assert.equals("comment_list", state.mode())
     code_review.quit()
   end)
 
@@ -86,7 +86,7 @@ describe("editor and voice", function()
     end
     vim.cmd("q")
     vim.fn.confirm = old_confirm
-    assert.equals("comment_open", state.mode())
+    assert.equals("comment_list", state.mode())
     code_review.quit()
   end)
 
@@ -124,7 +124,7 @@ describe("editor and voice", function()
     end
     actions.toggle_voice()
     vim.wait(1000, function()
-      return state.mode() == "comment_open" and state.get().voice == nil
+      return state.mode() == "comment_list" and state.get().voice == nil
     end)
     local review = model.find_review(state.get().store, state.get().active_review_id)
     local comment = model.find_comment(review, state.get().current_comment_id)

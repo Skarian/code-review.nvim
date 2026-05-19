@@ -38,10 +38,6 @@ function M.toggle()
     M._transcribe()
     return
   end
-  if s.mode ~= "comment_open" then
-    notify.warn("Open a Comment before recording voice.")
-    return
-  end
   local review = model.find_review(s.store, s.active_review_id)
   local comment = model.find_comment(review, s.current_comment_id)
   if not comment then
@@ -118,7 +114,7 @@ function M.discard()
   end
   s.voice = nil
   if state.is_active() then
-    state.set_mode("comment_open")
+    state.set_mode("comment_list")
     require("code-review.sidebar").render()
   end
   notify.warn("Voice transcription discarded.")
@@ -133,7 +129,7 @@ function M._record_done(result, stderr_text)
     temp.delete(s.voice.audio_path)
     s.voice = nil
     if state.is_active() then
-      state.set_mode("comment_open")
+      state.set_mode("comment_list")
       require("code-review.sidebar").render()
     end
     if result and result.event == "recording_too_short" then
@@ -199,7 +195,7 @@ function M._transcribe_done(result, stderr_text)
     end
     temp.delete(voice.audio_path)
     s.voice = nil
-    state.set_mode("comment_open")
+    state.set_mode("comment_list")
     require("code-review.sidebar").render()
     return
   end
@@ -210,7 +206,7 @@ function M._transcribe_done(result, stderr_text)
   else
     temp.delete(voice.audio_path)
     s.voice = nil
-    state.set_mode("comment_open")
+    state.set_mode("comment_list")
     notify.warn((result and (result.message or result.code)) or stderr_text or "Voice transcription failed.")
   end
   require("code-review.sidebar").render()
