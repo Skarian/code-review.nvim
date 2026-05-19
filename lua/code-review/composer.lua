@@ -28,6 +28,15 @@ local function split_body(body)
   return vim.split(body, "\n", { plain = true })
 end
 
+local function edit_body_lines(body)
+  local lines = split_body(body)
+  local last = lines[#lines] or ""
+  if last:match("%S$") then
+    lines[#lines] = last .. "  "
+  end
+  return lines
+end
+
 local function body_lines(composer)
   if not composer or not valid_buf(composer.body_buf) then
     return {}
@@ -290,7 +299,8 @@ local function open(opts)
     return
   end
   local source_win = vim.api.nvim_get_current_win()
-  local handle = ui.open_composer_stack(split_body(opts.body or ""))
+  local body_lines_for_open = opts.body_lines or split_body(opts.body or "")
+  local handle = ui.open_composer_stack(body_lines_for_open)
   local composer = {
     buf = handle.body_buf,
     win = handle.body_win,
@@ -330,7 +340,13 @@ local function open(opts)
   M.refresh()
   refresh_draft_highlights()
   focus_section("body")
-  vim.cmd("startinsert")
+  if opts.start_insert == false then
+    local last_line = body_lines_for_open[#body_lines_for_open] or ""
+    vim.api.nvim_win_set_cursor(composer.body_win, { #body_lines_for_open, math.max(#last_line - 1, 0) })
+    vim.cmd("stopinsert")
+  else
+    vim.cmd("startinsert")
+  end
 end
 
 function M.open_new(reference)
@@ -341,7 +357,8 @@ function M.open_edit(comment)
   open({
     target_comment_id = comment.id,
     references = comment.file_references,
-    body = comment.body,
+    body_lines = edit_body_lines(comment.body),
+    start_insert = false,
   })
 end
 

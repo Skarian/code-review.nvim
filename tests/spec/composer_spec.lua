@@ -118,6 +118,31 @@ describe("comment composer", function()
     code_review.quit()
   end)
 
+  it("opens existing comments in normal mode at the end of the body", function()
+    local code_review, _actions, state, model = start_project()
+    local review = model.find_review(state.get().store, state.get().active_review_id)
+    local comment = model.new_comment("2026-05-18T00:00:01Z")
+    comment.body = "first\nsecond"
+    table.insert(comment.file_references, model.new_file_reference({
+      relative_path = "x.lua",
+      start_line = 1,
+      end_line = 1,
+      selected_lines_snapshot = { "one" },
+    }))
+    table.insert(review.comments, comment)
+
+    require("code-review.composer").open_edit(comment)
+
+    local composer = state.get().composer
+    assert.equals("first\nsecond  ", composer_text(composer))
+    assert.equals("first\nsecond", comment.body)
+    assert.equals(composer.body_win, vim.api.nvim_get_current_win())
+    assert.same({ 2, 7 }, vim.api.nvim_win_get_cursor(composer.body_win))
+    assert.equals("n", vim.api.nvim_get_mode().mode)
+    require("code-review.composer").cancel()
+    code_review.quit()
+  end)
+
   it("opens compact composer help and maps q and escape to close it", function()
     local code_review, actions, state = start_project()
     select_lines(actions, 1, 1)

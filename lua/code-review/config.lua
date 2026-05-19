@@ -12,6 +12,7 @@ M.defaults = {
     add_reference = "a",
     append_reference = "r",
     edit_comment = "e",
+    edit_comment_under_cursor = "o",
     preview = "p",
     quit = "q",
   },

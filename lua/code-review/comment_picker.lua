@@ -40,9 +40,9 @@ local function render_comment(comment)
   return table.concat(vim.list_slice(lines, 3), "\n")
 end
 
-local function items_for(review)
+local function items_for_comments(comments)
   local items = {}
-  for _, comment in ipairs(model.comments_newest(review)) do
+  for _, comment in ipairs(model.comments_newest({ comments = comments })) do
     items[#items + 1] = {
       comment = comment,
       label = string.format("%s  %s", time.relative(comment.updated_at), first_body_line(comment)),
@@ -50,6 +50,10 @@ local function items_for(review)
     }
   end
   return items
+end
+
+local function items_for(review)
+  return items_for_comments(review.comments or {})
 end
 
 function M.adapter.pick_comments(items, callbacks)
@@ -111,7 +115,7 @@ function M.open(opts)
     notify.warn("Create or select a Review first.")
     return
   end
-  local items = items_for(review)
+  local items = opts.comments and items_for_comments(opts.comments) or items_for(review)
   if #items == 0 then
     notify.warn("No Comments in this Review.")
     return

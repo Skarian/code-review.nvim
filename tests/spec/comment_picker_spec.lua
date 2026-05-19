@@ -30,6 +30,16 @@ describe("comment picker", function()
     return comment
   end
 
+  local function with_notify(fn)
+    local messages = {}
+    local old_notify = vim.notify
+    vim.notify = function(message)
+      messages[#messages + 1] = message
+    end
+    fn(messages)
+    vim.notify = old_notify
+  end
+
   it("opens edit composer from newest-first picker items with previews", function()
     local code_review, actions, model, state, review = start_project()
     local older = add_comment(model, review, "older body", 1, "2026-05-18T00:00:01Z")
@@ -92,6 +102,81 @@ describe("comment picker", function()
     vim.ui.select = old_select
     assert.equals(1, #review.comments)
     assert.equals(first.id, review.comments[1].id)
+    code_review.quit()
+  end)
+
+  it("opens the comment editor directly from a single highlighted line", function()
+    local code_review, actions, model, state, review = start_project()
+    local comment = add_comment(model, review, "body", 2, "2026-05-18T00:00:01Z")
+    require("code-review.highlights").refresh()
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+
+    actions.edit_comment_under_cursor()
+
+    assert.equals("composer", state.mode())
+    assert.equals(comment.id, state.get().composer.target_comment_id)
+    code_review.quit()
+  end)
+
+  it("opens a previewed picker with only matching comments for overlapping highlighted lines", function()
+    local code_review, actions, model, _state, review = start_project()
+    local first = add_comment(model, review, "first", 2, "2026-05-18T00:00:01Z")
+    local second = add_comment(model, review, "second", 2, "2026-05-18T00:00:02Z")
+    add_comment(model, review, "third", 4, "2026-05-18T00:00:03Z")
+    local picker = require("code-review.comment_picker")
+    local old_pick = picker.adapter.pick_comments
+    picker.adapter.pick_comments = function(items, callbacks)
+      assert.equals(2, #items)
+      assert.equals(second.id, items[1].comment.id)
+      assert.equals(first.id, items[2].comment.id)
+      assert.truthy(items[1].preview:find("x.lua:2-2", 1, true))
+      assert.falsy(items[1].preview:find("third", 1, true))
+      callbacks.cancel()
+    end
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+
+    actions.edit_comment_under_cursor()
+
+    picker.adapter.pick_comments = old_pick
+    code_review.quit()
+  end)
+
+  it("warns without opening UI when no comment is highlighted under the cursor", function()
+    local code_review, actions, model, state, review = start_project()
+    add_comment(model, review, "body", 2, "2026-05-18T00:00:01Z")
+    local picker = require("code-review.comment_picker")
+    local old_pick = picker.adapter.pick_comments
+    local picked = false
+    picker.adapter.pick_comments = function()
+      picked = true
+    end
+
+    with_notify(function(messages)
+      vim.api.nvim_win_set_cursor(0, { 4, 0 })
+      actions.edit_comment_under_cursor()
+      assert.equals("No Comment on the current line.", messages[1])
+    end)
+
+    picker.adapter.pick_comments = old_pick
+    assert.is_false(picked)
+    assert.falsy(state.get().composer)
+    code_review.quit()
+  end)
+
+  it("keeps the existing edit comment action as the all-comments picker", function()
+    local code_review, actions, model, _state, review = start_project()
+    add_comment(model, review, "first", 1, "2026-05-18T00:00:01Z")
+    add_comment(model, review, "second", 3, "2026-05-18T00:00:02Z")
+    local picker = require("code-review.comment_picker")
+    local old_pick = picker.adapter.pick_comments
+    picker.adapter.pick_comments = function(items, callbacks)
+      assert.equals(2, #items)
+      callbacks.cancel()
+    end
+
+    actions.edit_comment()
+
+    picker.adapter.pick_comments = old_pick
     code_review.quit()
   end)
 end)

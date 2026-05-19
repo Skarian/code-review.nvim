@@ -219,6 +219,51 @@ function M.edit_comment()
   end
 end
 
+local function comments_under_cursor()
+  local s = state.get()
+  local review = active_review()
+  if not review then
+    return nil, "Create or select a Review first."
+  end
+  local bufnr = vim.api.nvim_get_current_buf()
+  local rel = path.relative(s.root, vim.api.nvim_buf_get_name(bufnr))
+  if not rel then
+    return nil, "File is outside the active Review root."
+  end
+  local cursor_line = vim.api.nvim_win_get_cursor(0)[1]
+  local matches = {}
+  for _, comment in ipairs(review.comments or {}) do
+    for _, ref in ipairs(comment.file_references or {}) do
+      if ref.relative_path == rel and cursor_line >= ref.start_line and cursor_line <= ref.end_line then
+        matches[#matches + 1] = comment
+        break
+      end
+    end
+  end
+  return matches
+end
+
+function M.edit_comment_under_cursor()
+  if not require_active() then
+    return
+  end
+  if blocked_by_editor_or_voice() then
+    return
+  end
+  local matches, err = comments_under_cursor()
+  if not matches then
+    notify.warn(err)
+    return
+  end
+  if #matches == 0 then
+    notify.warn("No Comment on the current line.")
+  elseif #matches == 1 then
+    require("code-review.composer").open_edit(matches[1])
+  else
+    require("code-review.comment_picker").open({ comments = matches })
+  end
+end
+
 function M.open_picker()
   if not state.is_active() then
     require("code-review").start()
