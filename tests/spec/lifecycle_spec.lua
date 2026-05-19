@@ -90,7 +90,18 @@ describe("lifecycle and keymaps", function()
     vim.cmd.edit(project .. "/x.lua")
     code_review.start()
     actions.create_review("One")
-    actions.new_comment()
+    local model = require("code-review.model")
+    local review = model.find_review(state.get().store, state.get().active_review_id)
+    local comment = model.new_comment()
+    comment.body = "selected"
+    table.insert(comment.file_references, model.new_file_reference({
+      relative_path = "x.lua",
+      start_line = 1,
+      end_line = 1,
+      selected_lines_snapshot = { "x" },
+    }))
+    table.insert(review.comments, comment)
+    state.get().current_comment_id = comment.id
     actions.create_review("Two")
     assert.equals("comment_list", state.mode())
     assert.equals(2, #state.get().store.reviews)

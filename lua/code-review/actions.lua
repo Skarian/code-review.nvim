@@ -222,25 +222,7 @@ function M.append_reference()
 end
 
 function M.new_comment()
-  if not require_active() then
-    return
-  end
-  if blocked_by_editor_or_voice() then
-    return
-  end
-  local s = state.get()
-  local review = active_review()
-  if not review then
-    notify.warn("Create or select a Review first.")
-    return
-  end
-  local comment = model.new_comment()
-  table.insert(review.comments, comment)
-  s.current_comment_id = comment.id
-  s.current_reference_index = 1
-  state.set_mode("comment_list")
-  model.touch_review(review)
-  persist()
+  notify.warn("Select lines with <leader>ra to create a Comment.")
 end
 
 function M.edit_comment()
