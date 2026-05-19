@@ -58,6 +58,99 @@ function M.open_composer(buf)
   return win, nil
 end
 
+local function make_float_buf(name, lines, modifiable)
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].buflisted = false
+  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].swapfile = false
+  pcall(vim.api.nvim_buf_set_name, buf, name)
+  if lines then
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  end
+  vim.bo[buf].modifiable = modifiable
+  return buf
+end
+
+local function open_float(buf, opts)
+  return vim.api.nvim_open_win(buf, opts.enter or false, {
+    relative = "editor",
+    row = opts.row,
+    col = opts.col,
+    width = opts.width,
+    height = opts.height,
+    style = "minimal",
+    border = opts.border or "rounded",
+    title = opts.title,
+    focusable = opts.focusable ~= false,
+  })
+end
+
+function M.open_composer_stack(body_lines)
+  local width = math.min(92, math.max(60, math.floor(vim.o.columns * 0.66)))
+  local body_height = math.min(16, math.max(8, math.floor(vim.o.lines * 0.32)))
+  local refs_height = 4
+  local status_height = 2
+  local gap = 2
+  local total_height = status_height + refs_height + body_height + gap * 2
+  local row = math.max(0, math.floor((vim.o.lines - total_height) / 2) - 1)
+  local col = math.max(0, math.floor((vim.o.columns - width) / 2))
+  local status_buf = make_float_buf("Code Review Composer Status", {}, false)
+  local refs_buf = make_float_buf("Code Review Composer References", {}, false)
+  local body_buf = make_float_buf("Code Review Comment", body_lines or { "" }, true)
+
+  local status_win = open_float(status_buf, {
+    row = row,
+    col = col,
+    width = width,
+    height = status_height,
+    title = " Code Review ",
+    focusable = false,
+  })
+  local refs_win = open_float(refs_buf, {
+    row = row + status_height + gap,
+    col = col,
+    width = width,
+    height = refs_height,
+    title = " References ",
+    focusable = true,
+  })
+  local body_win = open_float(body_buf, {
+    row = row + status_height + refs_height + gap * 2,
+    col = col,
+    width = width,
+    height = body_height,
+    title = " Comment ",
+    focusable = true,
+    enter = true,
+  })
+  for _, win in ipairs({ status_win, refs_win, body_win }) do
+    vim.wo[win].number = false
+    vim.wo[win].relativenumber = false
+    vim.wo[win].signcolumn = "no"
+    vim.wo[win].wrap = true
+  end
+  vim.bo[body_buf].filetype = "markdown"
+  vim.wo[body_win].linebreak = true
+  vim.wo[body_win].breakindent = true
+  vim.wo[body_win].spell = true
+  return {
+    status_buf = status_buf,
+    status_win = status_win,
+    refs_buf = refs_buf,
+    refs_win = refs_win,
+    body_buf = body_buf,
+    body_win = body_win,
+    close = function(self)
+      for _, win in ipairs({ self.status_win, self.refs_win, self.body_win }) do
+        if win and vim.api.nvim_win_is_valid(win) then
+          pcall(vim.api.nvim_win_close, win, true)
+        end
+      end
+    end,
+  }
+end
+
 function M.open_composer_help(lines)
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].buftype = "nofile"
