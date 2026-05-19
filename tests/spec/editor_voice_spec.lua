@@ -13,7 +13,7 @@ describe("editor and voice", function()
     code_review.start()
     actions.create_review("Edit")
     actions.new_comment()
-    actions.edit_comment()
+    require("code-review.editor").open()
     local editor = state.get().editor.buf
     vim.api.nvim_buf_set_lines(editor, 0, -1, false, { "body text" })
     require("code-review.editor").save()
@@ -39,7 +39,7 @@ describe("editor and voice", function()
     code_review.start()
     actions.create_review("Edit")
     actions.new_comment()
-    actions.edit_comment()
+    require("code-review.editor").open()
     local editor = state.get().editor.buf
     vim.api.nvim_buf_set_lines(editor, 0, -1, false, { "dirty" })
     vim.bo[editor].modified = true
@@ -70,7 +70,7 @@ describe("editor and voice", function()
     code_review.start()
     actions.create_review("Edit")
     actions.new_comment()
-    actions.edit_comment()
+    require("code-review.editor").open()
     local editor = state.get().editor.buf
     vim.api.nvim_buf_set_lines(editor, 0, -1, false, { "dirty" })
     vim.bo[editor].modified = true

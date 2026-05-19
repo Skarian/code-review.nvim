@@ -29,6 +29,18 @@ package.preload["snacks"] = function()
         end,
       }
     end,
+    picker = {
+      pick = function(opts)
+        local items = opts.finder()
+        local picker = { close = function() end }
+        if opts.confirm then
+          opts.confirm(picker, items[1])
+        elseif opts.actions and opts.actions.confirm then
+          opts.actions.confirm(picker, items[1])
+        end
+        return picker
+      end,
+    },
   }
 end
 

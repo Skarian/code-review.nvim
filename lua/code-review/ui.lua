@@ -11,6 +11,17 @@ local function snacks()
   return mod
 end
 
+local function picker()
+  local mod = snacks()
+  if type(mod.picker) == "table" and type(mod.picker.pick) == "function" then
+    return mod.picker.pick
+  end
+  if type(mod.picker) == "function" then
+    return mod.picker
+  end
+  error("code-review.nvim requires Snacks.picker", 2)
+end
+
 function M.open_composer(buf)
   local win = snacks().win({
     buf = buf,
@@ -29,6 +40,70 @@ function M.open_composer(buf)
     return win.win or win.winid or win[1], win
   end
   return win, nil
+end
+
+function M.pick_comments(items, callbacks)
+  return picker()({
+    title = "Code Review Comments",
+    finder = function()
+      local out = {}
+      for index, item in ipairs(items) do
+        out[#out + 1] = {
+          idx = index,
+          text = item.label,
+          item = item,
+        }
+      end
+      return out
+    end,
+    format = function(item)
+      return { { item.text } }
+    end,
+    preview = function(ctx)
+      if not ctx or not ctx.buf or not ctx.item then
+        return
+      end
+      vim.bo[ctx.buf].modifiable = true
+      vim.api.nvim_buf_set_lines(ctx.buf, 0, -1, false, vim.split(ctx.item.item.preview or "", "\n", { plain = true }))
+      vim.bo[ctx.buf].modifiable = false
+    end,
+    confirm = function(active_picker, item)
+      if active_picker and active_picker.close then
+        active_picker:close()
+      end
+      if item and item.item then
+        callbacks.select(item.item)
+      elseif callbacks.cancel then
+        callbacks.cancel()
+      end
+    end,
+    actions = {
+      delete = function(active_picker, item)
+        if active_picker and active_picker.close then
+          active_picker:close()
+        end
+        if item and item.item then
+          callbacks.delete(item.item)
+        end
+      end,
+      jump = function(active_picker, item)
+        if active_picker and active_picker.close then
+          active_picker:close()
+        end
+        if item and item.item then
+          callbacks.jump(item.item)
+        end
+      end,
+    },
+    win = {
+      input = {
+        keys = {
+          ["d"] = { "delete", mode = { "n" }, desc = "Delete Comment" },
+          ["o"] = { "jump", mode = { "n" }, desc = "Jump to File Reference" },
+        },
+      },
+    },
+  })
 end
 
 return M

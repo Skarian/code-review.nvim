@@ -165,45 +165,60 @@ local function visual_range()
   return a, b
 end
 
-function M.add_reference()
+local function capture_reference()
   if not require_active() then
-    return
+    return nil
   end
   local s = state.get()
   if blocked_by_editor_or_voice() then
-    return
+    return nil
   end
   if not active_review() then
     notify.warn("Create or select a Review first.")
-    return
+    return nil
   end
   local bufnr = vim.api.nvim_get_current_buf()
   if vim.bo[bufnr].buftype ~= "" or vim.api.nvim_buf_get_name(bufnr) == "" then
     notify.warn("Save the buffer before adding a File Reference.")
-    return
+    return nil
   end
   if vim.bo[bufnr].modified then
     notify.warn("Write the buffer before adding a File Reference.")
-    return
+    return nil
   end
   local rel = path.relative(s.root, vim.api.nvim_buf_get_name(bufnr))
   if not rel then
     notify.warn("File is outside the active Review root.")
-    return
+    return nil
   end
   local start_line, end_line = visual_range()
   if start_line < 1 or end_line < start_line then
     notify.warn("Select lines before adding a File Reference.")
-    return
+    return nil
   end
   local snapshot = vim.api.nvim_buf_get_lines(bufnr, start_line - 1, end_line, false)
-  local ref = model.new_file_reference({
+  return model.new_file_reference({
     relative_path = rel,
     start_line = start_line,
     end_line = end_line,
     selected_lines_snapshot = snapshot,
   })
+end
+
+function M.add_reference()
+  local ref = capture_reference()
+  if not ref then
+    return
+  end
   require("code-review.composer").open_new(ref)
+end
+
+function M.append_reference()
+  local ref = capture_reference()
+  if not ref then
+    return
+  end
+  require("code-review.comment_picker").open({ append_reference = ref })
 end
 
 function M.new_comment()
@@ -230,7 +245,7 @@ end
 
 function M.edit_comment()
   if require_active() then
-    require("code-review.editor").open()
+    require("code-review.comment_picker").open()
   end
 end
 
