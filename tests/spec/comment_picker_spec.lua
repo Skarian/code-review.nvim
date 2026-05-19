@@ -40,6 +40,12 @@ describe("comment picker", function()
     vim.notify = old_notify
   end
 
+  local function wait_for_composer(state)
+    vim.wait(100, function()
+      return state.get().composer ~= nil
+    end)
+  end
+
   it("opens edit composer from newest-first picker items with previews", function()
     local code_review, actions, model, state, review = start_project()
     local older = add_comment(model, review, "older body", 1, "2026-05-18T00:00:01Z")
@@ -54,6 +60,7 @@ describe("comment picker", function()
     end
     actions.edit_comment()
     picker.adapter.pick_comments = old_pick
+    wait_for_composer(state)
     assert.equals("composer", state.mode())
     assert.equals(newer.id, state.get().composer.target_comment_id)
     vim.api.nvim_buf_set_lines(state.get().composer.body_buf, 0, -1, false, { "edited" })
@@ -119,7 +126,7 @@ describe("comment picker", function()
   end)
 
   it("opens a previewed picker with only matching comments for overlapping highlighted lines", function()
-    local code_review, actions, model, _state, review = start_project()
+    local code_review, actions, model, state, review = start_project()
     local first = add_comment(model, review, "first", 2, "2026-05-18T00:00:01Z")
     local second = add_comment(model, review, "second", 2, "2026-05-18T00:00:02Z")
     add_comment(model, review, "third", 4, "2026-05-18T00:00:03Z")
@@ -131,13 +138,19 @@ describe("comment picker", function()
       assert.equals(first.id, items[2].comment.id)
       assert.truthy(items[1].preview:find("x.lua:2-2", 1, true))
       assert.falsy(items[1].preview:find("third", 1, true))
-      callbacks.cancel()
+      callbacks.select(items[1])
+      assert.falsy(state.get().composer)
     end
     vim.api.nvim_win_set_cursor(0, { 2, 0 })
 
     actions.edit_comment_under_cursor()
 
     picker.adapter.pick_comments = old_pick
+    wait_for_composer(state)
+    local composer = state.get().composer
+    assert.equals("composer", state.mode())
+    assert.equals(second.id, composer.target_comment_id)
+    assert.equals("second  ", table.concat(vim.api.nvim_buf_get_lines(composer.body_buf, 0, -1, false), "\n"))
     code_review.quit()
   end)
 

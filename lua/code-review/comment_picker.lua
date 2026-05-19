@@ -108,6 +108,14 @@ local function append_reference(comment, reference)
   persist()
 end
 
+local function open_comment_editor(comment)
+  vim.schedule(function()
+    if state.is_active() and not state.get().composer then
+      require("code-review.composer").open_edit(comment)
+    end
+  end)
+end
+
 function M.open(opts)
   opts = opts or {}
   local review = active_review()
@@ -125,7 +133,7 @@ function M.open(opts)
       if opts.append_reference then
         append_reference(item.comment, opts.append_reference)
       else
-        require("code-review.composer").open_edit(item.comment)
+        open_comment_editor(item.comment)
       end
     end,
     delete = function(item)
