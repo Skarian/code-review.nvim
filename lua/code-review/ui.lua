@@ -30,6 +30,14 @@ local function picker()
   error("code-review.nvim requires Snacks.picker", 2)
 end
 
+local function close_window(win, handle)
+  if handle and type(handle.close) == "function" then
+    pcall(handle.close, handle)
+  elseif win and vim.api.nvim_win_is_valid(win) then
+    pcall(vim.api.nvim_win_close, win, true)
+  end
+end
+
 function M.open_composer(buf)
   local win = snacks().win({
     buf = buf,
@@ -48,6 +56,46 @@ function M.open_composer(buf)
     return win.win or win.winid or win[1], win
   end
   return win, nil
+end
+
+function M.open_composer_help(lines)
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].buflisted = false
+  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].swapfile = false
+  pcall(vim.api.nvim_buf_set_name, buf, "Code Review Composer Help")
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = false
+  local result = snacks().win({
+    buf = buf,
+    title = " Code Review Composer Help ",
+    border = "rounded",
+    width = math.min(72, math.max(48, math.floor(vim.o.columns * 0.5))),
+    height = math.min(#lines + 2, math.max(8, math.floor(vim.o.lines * 0.35))),
+    wo = {
+      number = false,
+      relativenumber = false,
+      signcolumn = "no",
+      wrap = true,
+    },
+  })
+  local win, handle
+  if type(result) == "table" then
+    win = result.win or result.winid or result[1]
+    handle = result
+  else
+    win = result
+  end
+  local close = function()
+    close_window(win, handle)
+    if vim.api.nvim_buf_is_valid(buf) then
+      pcall(vim.api.nvim_buf_delete, buf, { force = true })
+    end
+  end
+  vim.keymap.set("n", "q", close, { buffer = buf, nowait = true, desc = "Close Code Review composer help" })
+  vim.keymap.set("n", "<Esc>", close, { buffer = buf, nowait = true, desc = "Close Code Review composer help" })
+  return win, handle, buf
 end
 
 function M.pick_comments(items, callbacks)

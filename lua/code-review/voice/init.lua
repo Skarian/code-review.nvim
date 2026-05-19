@@ -9,6 +9,10 @@ local temp = require("code-review.voice.temp")
 
 local M = {}
 
+local function refresh_composer()
+  pcall(require("code-review.composer").refresh)
+end
+
 function M.available()
   local cfg = config.get().voice
   if not cfg.enabled then
@@ -31,6 +35,7 @@ function M.toggle()
   if s.mode == "recording" and s.voice and s.voice.recording then
     s.voice.recording.stop()
     state.set_mode("transcribing")
+    refresh_composer()
     require("code-review.sidebar").render()
     return
   end
@@ -71,6 +76,7 @@ function M.toggle()
     on_event = function(event)
       if event.event == "recording_started" then
         state.set_mode("recording")
+        refresh_composer()
         require("code-review.sidebar").render()
       end
     end,
@@ -86,6 +92,7 @@ function M.toggle()
   end
   s.voice.recording = recording
   state.set_mode("recording")
+  refresh_composer()
   require("code-review.sidebar").render()
 end
 
@@ -121,6 +128,7 @@ function M.discard()
   s.voice = nil
   if state.is_active() then
     state.set_mode(s.composer and "composer" or "comment_list")
+    refresh_composer()
     require("code-review.sidebar").render()
   end
   notify.warn("Voice transcription discarded.")
@@ -136,6 +144,7 @@ function M._record_done(result, stderr_text)
     s.voice = nil
     if state.is_active() then
       state.set_mode(s.composer and "composer" or "comment_list")
+      refresh_composer()
       require("code-review.sidebar").render()
     end
     if result and result.event == "recording_too_short" then
@@ -159,6 +168,7 @@ function M._transcribe()
   end
   voice.attempts = (voice.attempts or 0) + 1
   state.set_mode("transcribing")
+  refresh_composer()
   voice.transcribing = process.transcribe({
     node_cmd = cfg.node_cmd,
     helper_path = cfg.helper_path or plugin.voice_helper(),
@@ -190,17 +200,20 @@ function M._transcribe_done(result, stderr_text)
       temp.delete(voice.audio_path)
       s.voice = nil
       state.set_mode("composer")
+      refresh_composer()
       require("code-review.sidebar").render()
       return
     end
     local max_attempts = cfg.max_transcription_attempts or 3
     if voice.attempts < max_attempts and result and result.retryable then
       state.set_mode("voice_error_pending")
+      refresh_composer()
       notify.warn((result.message or result.code or "Voice transcription failed") .. " Press voice again to retry.")
     else
       temp.delete(voice.audio_path)
       s.voice = nil
       state.set_mode("composer")
+      refresh_composer()
       notify.warn((result and (result.message or result.code)) or stderr_text or "Voice transcription failed.")
     end
     require("code-review.sidebar").render()

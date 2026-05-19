@@ -544,7 +544,7 @@ Behavior:
 
 ## Comment Composer
 
-The composer is the primary create/edit surface for Comments. It uses `Snacks.win` with a compact floating scratch buffer and starts in Normal mode.
+The composer is the primary create/edit surface for Comments. It uses `Snacks.win` with a compact floating scratch buffer and starts in Normal mode. It shows protected compact key instructions, inline voice status, and a `?` hint for expanded help above the editable body.
 
 Buffer options:
 
@@ -561,6 +561,7 @@ Behavior:
 - Normal `q` and Normal `<Esc>` cancel.
 - Normal `<Space>` toggles voice recording. Insert-mode Space inserts a space.
 - Normal `d` on a reference row confirms and removes that draft reference.
+- Normal `?` opens compact read-only composer help; `q` and `<Esc>` close help without canceling the composer.
 - Submit refuses zero references or empty trimmed body and keeps the composer open.
 - Canceling a new composer creates no Comment.
 - Canceling an edit composer leaves the persisted Comment unchanged.

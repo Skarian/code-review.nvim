@@ -19,6 +19,10 @@ describe("comment composer", function()
     actions.add_reference()
   end
 
+  local function composer_text(composer)
+    return table.concat(vim.api.nvim_buf_get_lines(composer.buf, 0, -1, false), "\n")
+  end
+
   it("accepts Snacks.win when it is a callable table", function()
     local previous = package.loaded.snacks
     local called = false
@@ -72,6 +76,20 @@ describe("comment composer", function()
     code_review.quit()
   end)
 
+  it("shows protected compact instructions and voice status", function()
+    local code_review, actions, state = start_project()
+    require("code-review.config").setup({ voice = { enabled = false } })
+    select_lines(actions, 1, 1)
+    local text = composer_text(state.get().composer)
+    assert.truthy(text:find("Keys: <CR> submit | q/<Esc> cancel | d delete ref | ? help", 1, true))
+    assert.truthy(text:find("Voice: unavailable", 1, true))
+    vim.api.nvim_buf_set_lines(state.get().composer.buf, state.get().composer.body_start, -1, false, { "body" })
+    require("code-review.composer").submit()
+    local review = require("code-review.model").find_review(state.get().store, state.get().active_review_id)
+    assert.equals("body", review.comments[1].body)
+    code_review.quit()
+  end)
+
   it("submits a complete comment from the selected reference and body", function()
     local code_review, actions, state, model = start_project()
     select_lines(actions, 2, 3)
@@ -85,6 +103,34 @@ describe("comment composer", function()
     assert.equals(3, comment.file_references[1].end_line)
     assert.equals("comment_list", state.mode())
     assert.equals(nil, state.get().composer)
+    code_review.quit()
+  end)
+
+  it("opens compact composer help and maps q and escape to close it", function()
+    local code_review, actions, state = start_project()
+    select_lines(actions, 1, 1)
+    local win, _, buf = require("code-review.composer").show_help()
+    assert.truthy(win)
+    assert.is_true(vim.api.nvim_buf_is_valid(buf))
+    local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+    assert.truthy(text:find("Composer keys", 1, true))
+    assert.truthy(text:find("<Space> starts recording", 1, true))
+    local maps = vim.api.nvim_buf_get_keymap(buf, "n")
+    local seen_q, seen_esc = false, false
+    for _, map in ipairs(maps) do
+      if map.lhs == "q" then
+        seen_q = true
+      elseif map.lhs == "<Esc>" then
+        seen_esc = true
+      end
+    end
+    assert.is_true(seen_q)
+    assert.is_true(seen_esc)
+    pcall(vim.api.nvim_win_close, win, true)
+    pcall(vim.api.nvim_buf_delete, buf, { force = true })
+    assert.equals("composer", state.mode())
+    require("code-review.composer").cancel()
+    assert.equals("comment_list", state.mode())
     code_review.quit()
   end)
 
@@ -149,6 +195,53 @@ describe("comment composer", function()
     end)
     local line = vim.api.nvim_buf_get_lines(composer.buf, composer.body_start, composer.body_start + 1, false)[1]
     assert.equals("start voiceend", line)
+    process.record = old_record
+    process.transcribe = old_transcribe
+    require("code-review.composer").cancel()
+    code_review.quit()
+  end)
+
+  it("updates composer voice status during recording, transcribing, retry, and discard", function()
+    local code_review, actions, state = start_project()
+    local config = require("code-review.config")
+    local process = require("code-review.voice.process")
+    local project = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":h")
+    local helper = project .. "/helper.js"
+    vim.fn.writefile({ "" }, helper)
+    config.setup({ storage = { dir = project .. "/store" }, voice = { helper_path = helper, transcription_timeout_ms = 55 } })
+    select_lines(actions, 1, 1)
+    local composer = state.get().composer
+    local old_record = process.record
+    local old_transcribe = process.transcribe
+    local record_opts
+    local transcribe_opts
+    process.record = function(opts)
+      record_opts = opts
+      vim.fn.writefile({ "wav" }, opts.out)
+      return {
+        stop = function()
+          opts.on_exit(0, { ok = true, event = "recording_stopped", durationMillis = 1000, audioBytes = 3 }, "")
+        end,
+        discard = function() end,
+        kill = function() end,
+      }
+    end
+    process.transcribe = function(opts)
+      transcribe_opts = opts
+      return { kill = function() end }
+    end
+    require("code-review.voice").toggle()
+    assert.truthy(record_opts)
+    assert.truthy(composer_text(composer):find("Voice: recording - <Space> stops", 1, true))
+    require("code-review.voice").toggle()
+    assert.truthy(transcribe_opts)
+    assert.truthy(composer_text(composer):find("Voice: transcribing...", 1, true))
+    transcribe_opts.on_exit(1, { ok = false, code = "network_error", message = "temporary", retryable = true }, "")
+    assert.equals("voice_error_pending", state.mode())
+    assert.truthy(composer_text(composer):find("Voice: failed - <Space> retries", 1, true))
+    require("code-review.voice").discard()
+    assert.equals("composer", state.mode())
+    assert.truthy(composer_text(composer):find("Voice: <Space> record", 1, true))
     process.record = old_record
     process.transcribe = old_transcribe
     require("code-review.composer").cancel()

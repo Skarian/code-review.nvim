@@ -1,5 +1,7 @@
+local config = require("code-review.config")
 local model = require("code-review.model")
 local notify = require("code-review.notify")
+local plugin = require("code-review.plugin")
 local state = require("code-review.state")
 local storage = require("code-review.storage")
 local ui = require("code-review.ui")
@@ -18,11 +20,40 @@ local function split_body(body)
   return vim.split(body, "\n", { plain = true })
 end
 
+local function voice_available()
+  local cfg = config.get().voice
+  if not cfg.enabled then
+    return false
+  end
+  local helper = cfg.helper_path or plugin.voice_helper()
+  return vim.fn.filereadable(helper) == 1
+end
+
+local function voice_status_line()
+  local s = state.get()
+  if s.mode == "recording" then
+    return "Voice: recording - <Space> stops"
+  end
+  if s.mode == "transcribing" then
+    return "Voice: transcribing..."
+  end
+  if s.mode == "voice_error_pending" then
+    return "Voice: failed - <Space> retries"
+  end
+  if not voice_available() then
+    return "Voice: unavailable"
+  end
+  return "Voice: <Space> record"
+end
+
 local function header_lines(references)
   local lines = { "File References:" }
   for index, ref in ipairs(references or {}) do
     lines[#lines + 1] = string.format("  %d. %s:%d-%d", index, ref.relative_path, ref.start_line, ref.end_line)
   end
+  lines[#lines + 1] = ""
+  lines[#lines + 1] = "Keys: <CR> submit | q/<Esc> cancel | d delete ref | ? help"
+  lines[#lines + 1] = voice_status_line()
   lines[#lines + 1] = ""
   lines[#lines + 1] = "Comment:"
   return lines
@@ -123,6 +154,9 @@ local function apply_keymaps(buf)
   vim.keymap.set("n", "<Space>", function()
     require("code-review.voice").toggle()
   end, { buffer = buf, nowait = true, desc = "Toggle Code Review voice" })
+  vim.keymap.set("n", "?", function()
+    require("code-review.composer").show_help()
+  end, { buffer = buf, nowait = true, desc = "Show Code Review composer help" })
 end
 
 local function open(opts)
@@ -217,6 +251,27 @@ end
 
 function M.close()
   clear_composer(true)
+end
+
+function M.refresh()
+  restore_header(state.get().composer)
+end
+
+function M.show_help()
+  return ui.open_composer_help({
+    "Composer keys",
+    "",
+    "<CR> submits the comment from Normal mode.",
+    "q or <Esc> cancels the composer without saving the draft.",
+    "d deletes the draft File Reference under the cursor.",
+    "<Space> starts recording, stops recording, or retries voice transcription.",
+    "",
+    "Voice states",
+    "",
+    "recording: press <Space> to stop recording.",
+    "transcribing: wait for text to be inserted at the cursor.",
+    "failed: press <Space> to retry, or quit/cancel to discard the draft.",
+  })
 end
 
 function M.delete_reference_under_cursor()
