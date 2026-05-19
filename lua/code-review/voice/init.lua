@@ -1,10 +1,8 @@
 local config = require("code-review.config")
-local model = require("code-review.model")
 local notify = require("code-review.notify")
 local process = require("code-review.voice.process")
 local plugin = require("code-review.plugin")
 local state = require("code-review.state")
-local storage = require("code-review.storage")
 local temp = require("code-review.voice.temp")
 
 local M = {}
@@ -43,13 +41,12 @@ function M.toggle()
     M._transcribe()
     return
   end
-  local review = model.find_review(s.store, s.active_review_id)
-  local comment = model.find_comment(review, s.current_comment_id)
   local composer = s.composer
-  if not composer and not comment then
-    notify.warn("No current Comment.")
+  if not composer then
+    notify.warn("Open a comment composer before using voice.")
     return
   end
+  local review = require("code-review.model").find_review(s.store, s.active_review_id)
   if not review then
     notify.warn("Create or select a Review first.")
     return
@@ -58,13 +55,11 @@ function M.toggle()
   local audio_path = temp.wav_path()
   local session_id = s.session_id
   local review_id = review.id
-  local comment_id = comment and comment.id or nil
   s.voice = {
     audio_path = audio_path,
     session_id = session_id,
     review_id = review_id,
-    comment_id = comment_id,
-    composer_buf = composer and composer.buf or nil,
+    composer_buf = composer.buf,
     attempts = 0,
   }
   local recording, err = process.record({
@@ -188,72 +183,31 @@ function M._transcribe_done(result, stderr_text)
   if not voice then
     return
   end
-  if voice.composer_buf then
-    if s.session_id ~= voice.session_id or s.active_review_id ~= voice.review_id or not s.composer or s.composer.buf ~= voice.composer_buf then
-      temp.delete(voice.audio_path)
-      s.voice = nil
-      notify.warn("Voice result discarded because Review state changed.")
-      return
-    end
-    if result and result.ok then
-      require("code-review.composer").insert_text(result.text or "")
-      temp.delete(voice.audio_path)
-      s.voice = nil
-      state.set_mode("composer")
-      refresh_composer()
-      require("code-review.sidebar").render()
-      return
-    end
-    local max_attempts = cfg.max_transcription_attempts or 3
-    if voice.attempts < max_attempts and result and result.retryable then
-      state.set_mode("voice_error_pending")
-      refresh_composer()
-      notify.warn((result.message or result.code or "Voice transcription failed") .. " Press voice again to retry.")
-    else
-      temp.delete(voice.audio_path)
-      s.voice = nil
-      state.set_mode("composer")
-      refresh_composer()
-      notify.warn((result and (result.message or result.code)) or stderr_text or "Voice transcription failed.")
-    end
-    require("code-review.sidebar").render()
-    return
-  end
-  if s.session_id ~= voice.session_id or s.active_review_id ~= voice.review_id or s.current_comment_id ~= voice.comment_id then
+  if s.session_id ~= voice.session_id or s.active_review_id ~= voice.review_id or not s.composer or s.composer.buf ~= voice.composer_buf then
     temp.delete(voice.audio_path)
     s.voice = nil
     notify.warn("Voice result discarded because Review state changed.")
     return
   end
-  local review = model.find_review(s.store, voice.review_id)
-  local comment = model.find_comment(review, voice.comment_id)
-  if not comment then
+  if result and result.ok then
+    require("code-review.composer").insert_text(result.text or "")
     temp.delete(voice.audio_path)
     s.voice = nil
-    notify.warn("Voice result discarded because Review state changed.")
-    return
-  end
-  if result and result.ok and comment then
-    local text = vim.trim(result.text or "")
-    if text ~= "" then
-      comment.body = vim.trim((comment.body or "") .. "\n" .. text)
-      model.touch_comment(review, comment)
-      storage.mark_dirty(s.storage)
-    end
-    temp.delete(voice.audio_path)
-    s.voice = nil
-    state.set_mode("comment_list")
+    state.set_mode("composer")
+    refresh_composer()
     require("code-review.sidebar").render()
     return
   end
   local max_attempts = cfg.max_transcription_attempts or 3
   if voice.attempts < max_attempts and result and result.retryable then
     state.set_mode("voice_error_pending")
+    refresh_composer()
     notify.warn((result.message or result.code or "Voice transcription failed") .. " Press voice again to retry.")
   else
     temp.delete(voice.audio_path)
     s.voice = nil
-    state.set_mode("comment_list")
+    state.set_mode("composer")
+    refresh_composer()
     notify.warn((result and (result.message or result.code)) or stderr_text or "Voice transcription failed.")
   end
   require("code-review.sidebar").render()

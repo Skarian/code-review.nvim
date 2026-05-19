@@ -169,9 +169,7 @@ function M.render()
     local comments = model.comments_newest(review)
     local content_lines = {}
     local content_highlights = {}
-    local current_content_line
     for _, comment in ipairs(comments) do
-      local current = comment.id == s.current_comment_id and "> " or "  "
       local flags = {}
       local incomplete = not model.comment_complete(comment)
       local stale = false
@@ -185,14 +183,9 @@ function M.render()
           break
         end
       end
-      content_lines[#content_lines + 1] = current .. time.relative(comment.updated_at) .. (#flags > 0 and (" [" .. table.concat(flags, ", ") .. "]") or "")
+      content_lines[#content_lines + 1] = time.relative(comment.updated_at) .. (#flags > 0 and (" [" .. table.concat(flags, ", ") .. "]") or "")
       local comment_line = #content_lines - 1
-      if comment.id == s.current_comment_id then
-        current_content_line = comment_line
-      end
-      if comment.id == s.current_comment_id then
-        content_highlights[#content_highlights + 1] = { line = comment_line, group = "CodeReviewSidebarCurrent" }
-      elseif incomplete then
+      if incomplete then
         content_highlights[#content_highlights + 1] = { line = comment_line, group = "CodeReviewSidebarIncomplete" }
       elseif stale then
         content_highlights[#content_highlights + 1] = { line = comment_line, group = "CodeReviewSidebarStale" }
@@ -208,10 +201,6 @@ function M.render()
     end
     local available = height > #legend and math.max(0, height - #legend - header_count) or #content_lines
     local start_line = 1
-    if current_content_line and available > 0 and #content_lines > available then
-      start_line = math.max(1, current_content_line - math.floor(available / 2) + 1)
-      start_line = math.min(start_line, #content_lines - available + 1)
-    end
     local end_line = available > 0 and math.min(#content_lines, start_line + available - 1) or #content_lines
     for idx = start_line, end_line do
       lines[#lines + 1] = padded(content_lines[idx], width)

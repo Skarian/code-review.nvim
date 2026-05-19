@@ -57,12 +57,11 @@ function M.adapter.pick_comments(items, callbacks)
 end
 
 local function delete_comment(comment)
-  local s = state.get()
   local review = active_review()
   if not review then
     return
   end
-  vim.ui.select({ "Delete", "Cancel" }, { prompt = "Delete selected Comment?" }, function(choice)
+  vim.ui.select({ "Delete", "Cancel" }, { prompt = "Delete Comment?" }, function(choice)
     if choice ~= "Delete" then
       return
     end
@@ -72,9 +71,6 @@ local function delete_comment(comment)
         break
       end
     end
-    local comments = model.comments_newest(review)
-    s.current_comment_id = comments[1] and comments[1].id or nil
-    s.current_reference_index = 1
     model.touch_review(review)
     persist()
   end)
@@ -84,11 +80,9 @@ local function jump_to_comment(comment)
   local s = state.get()
   local ref = comment.file_references and comment.file_references[1]
   if not ref then
-    notify.warn("Selected Comment has no File References.")
+    notify.warn("Comment has no File References.")
     return
   end
-  s.current_comment_id = comment.id
-  s.current_reference_index = 1
   vim.cmd.edit(vim.fs.joinpath(s.root, ref.relative_path))
   vim.api.nvim_win_set_cursor(0, { ref.start_line, 0 })
   require("code-review.sidebar").render()
@@ -102,13 +96,10 @@ local function append_reference(comment, reference)
   end
   comment = model.find_comment(review, comment.id)
   if not comment then
-    notify.warn("Selected Comment no longer exists.")
+    notify.warn("Comment no longer exists.")
     return
   end
   table.insert(comment.file_references, reference)
-  local s = state.get()
-  s.current_comment_id = comment.id
-  s.current_reference_index = #comment.file_references
   model.touch_comment(review, comment)
   persist()
 end
@@ -130,8 +121,6 @@ function M.open(opts)
       if opts.append_reference then
         append_reference(item.comment, opts.append_reference)
       else
-        state.get().current_comment_id = item.comment.id
-        state.get().current_reference_index = 1
         require("code-review.composer").open_edit(item.comment)
       end
     end,

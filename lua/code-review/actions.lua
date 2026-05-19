@@ -21,11 +21,7 @@ local function current_buffer_allows_action(action)
     notify.warn("Code Review actions run from code buffers.")
     return false
   end
-  if s.editor and s.editor.buf == bufnr then
-    notify.warn("Submit or cancel the comment composer first.")
-    return false
-  end
-  if s.composer and s.composer.buf == bufnr then
+  if s.composer and (s.composer.buf == bufnr or s.composer.body_buf == bufnr or s.composer.refs_buf == bufnr or s.composer.status_buf == bufnr) then
     notify.warn("Submit or cancel the comment composer first.")
     return false
   end
@@ -51,7 +47,7 @@ end
 
 local function blocked_by_editor_or_voice()
   local mode = state.mode()
-  if mode == "body_editor_clean" or mode == "body_editor_dirty" or mode == "composer" then
+  if mode == "composer" then
     notify.warn("Submit or cancel the comment composer first.")
     return true
   end
@@ -60,10 +56,6 @@ local function blocked_by_editor_or_voice()
     return true
   end
   return false
-end
-
-local function voice_error_pending()
-  return state.mode() == "voice_error_pending"
 end
 
 local function require_active()
@@ -101,8 +93,6 @@ function M.select_review(review_id)
   local s = state.get()
   s.active_review_id = review_id
   s.store.last_active_review_id = review_id
-  s.current_comment_id = nil
-  s.current_reference_index = 1
   state.set_mode("comment_list")
   persist()
 end
@@ -134,8 +124,6 @@ function M.delete_review()
     local next_review = s.store.reviews[1]
     s.active_review_id = next_review and next_review.id or nil
     s.store.last_active_review_id = s.active_review_id
-    s.current_comment_id = nil
-    s.current_reference_index = 1
     state.set_mode(s.active_review_id and "comment_list" or "review_picker")
     persist()
     if not s.active_review_id then
@@ -310,153 +298,6 @@ function M.preview()
     pcall(vim.api.nvim_buf_delete, s.preview.buf, { force = true })
   end
   open_preview()
-end
-
-function M.next()
-  if not require_active() then
-    return
-  end
-  if blocked_by_editor_or_voice() then
-    return
-  end
-  local s = state.get()
-  local review = active_review()
-  if not review then
-    return
-  end
-  local comments = model.comments_newest(review)
-  for idx, comment in ipairs(comments) do
-    if comment.id == s.current_comment_id then
-      s.current_comment_id = (comments[idx + 1] or comments[1] or {}).id
-      break
-    end
-  end
-  if not s.current_comment_id and comments[1] then
-    s.current_comment_id = comments[1].id
-  end
-  s.current_reference_index = 1
-  require("code-review.sidebar").render()
-  require("code-review.highlights").refresh()
-end
-
-function M.previous()
-  if not require_active() then
-    return
-  end
-  if blocked_by_editor_or_voice() then
-    return
-  end
-  local s = state.get()
-  local review = active_review()
-  if not review then
-    return
-  end
-  local comments = model.comments_newest(review)
-  for idx, comment in ipairs(comments) do
-    if comment.id == s.current_comment_id then
-      s.current_comment_id = (comments[idx - 1] or comments[#comments] or {}).id
-      break
-    end
-  end
-  if not s.current_comment_id and comments[1] then
-    s.current_comment_id = comments[1].id
-  end
-  s.current_reference_index = 1
-  require("code-review.sidebar").render()
-  require("code-review.highlights").refresh()
-end
-
-function M.open_current()
-  if not require_active() then
-    return
-  end
-  if blocked_by_editor_or_voice() then
-    return
-  end
-  local s = state.get()
-  local review = active_review()
-  local comment = model.find_comment(review, s.current_comment_id)
-  if not comment then
-    notify.warn("No current Comment.")
-    return
-  end
-  local ref = comment.file_references[s.current_reference_index]
-  if ref then
-    vim.cmd.edit(vim.fs.joinpath(s.root, ref.relative_path))
-    vim.api.nvim_win_set_cursor(0, { ref.start_line, 0 })
-  end
-end
-
-function M.close_comment()
-  if require_active() then
-    if voice_error_pending() then
-      require("code-review.voice").discard()
-    end
-    if blocked_by_editor_or_voice() then
-      return
-    end
-    state.get().current_comment_id = nil
-    state.get().current_reference_index = 1
-    state.set_mode("comment_list")
-    require("code-review.sidebar").render()
-  end
-end
-
-function M.delete_reference()
-  if not require_active() then
-    return
-  end
-  if blocked_by_editor_or_voice() then
-    return
-  end
-  local s = state.get()
-  local review = active_review()
-  local comment = model.find_comment(review, s.current_comment_id)
-  if not comment or not comment.file_references[s.current_reference_index] then
-    notify.warn("No current File Reference.")
-    return
-  end
-  vim.ui.select({ "Delete", "Cancel" }, { prompt = "Delete current File Reference?" }, function(choice)
-    if choice ~= "Delete" then
-      return
-    end
-    table.remove(comment.file_references, s.current_reference_index)
-    s.current_reference_index = math.max(1, math.min(s.current_reference_index, #comment.file_references))
-    model.touch_comment(review, comment)
-    persist()
-  end)
-end
-
-function M.delete_comment()
-  if not require_active() then
-    return
-  end
-  if blocked_by_editor_or_voice() then
-    return
-  end
-  local s = state.get()
-  local review = active_review()
-  if not review or not s.current_comment_id then
-    notify.warn("No current Comment.")
-    return
-  end
-  vim.ui.select({ "Delete", "Cancel" }, { prompt = "Delete current Comment?" }, function(choice)
-    if choice ~= "Delete" then
-      return
-    end
-    for idx, comment in ipairs(review.comments) do
-      if comment.id == s.current_comment_id then
-        table.remove(review.comments, idx)
-        break
-      end
-    end
-    local comments = model.comments_newest(review)
-    s.current_comment_id = comments[1] and comments[1].id or nil
-    s.current_reference_index = 1
-    state.set_mode("comment_list")
-    model.touch_review(review)
-    persist()
-  end)
 end
 
 function M.quit()

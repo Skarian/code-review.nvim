@@ -8,12 +8,10 @@ local ns = vim.api.nvim_create_namespace("code-review.nvim")
 
 function M.setup()
   vim.api.nvim_set_hl(0, "CodeReviewReference", { bg = "#2d3f2d", default = true })
-  vim.api.nvim_set_hl(0, "CodeReviewCurrentReference", { bg = "#3f3f1f", bold = true, default = true })
   vim.api.nvim_set_hl(0, "CodeReviewDraftReference", { bg = "#263f5f", default = true })
   vim.api.nvim_set_hl(0, "CodeReviewStaleReference", { bg = "#4a1f1f", default = true })
   vim.api.nvim_set_hl(0, "CodeReviewStatus", { fg = "#ffd75f", bold = true, default = true })
   vim.api.nvim_set_hl(0, "CodeReviewSidebarHeader", { fg = "#8ec07c", bold = true, default = true })
-  vim.api.nvim_set_hl(0, "CodeReviewSidebarCurrent", { bg = "#303030", bold = true, default = true })
   vim.api.nvim_set_hl(0, "CodeReviewSidebarIncomplete", { fg = "#fabd2f", default = true })
   vim.api.nvim_set_hl(0, "CodeReviewSidebarStale", { fg = "#fb4934", default = true })
 end
@@ -45,9 +43,6 @@ function M.refresh(bufnr)
     for i, ref in ipairs(comment.file_references or {}) do
       if ref.relative_path == rel then
         local hl = ref.stale_state == "stale" and "CodeReviewStaleReference" or "CodeReviewReference"
-        if comment.id == s.current_comment_id and i == s.current_reference_index then
-          hl = "CodeReviewCurrentReference"
-        end
         local start_line = math.max(0, math.min(line_count - 1, ref.start_line - 1))
         local end_line = math.max(0, math.min(line_count - 1, ref.end_line - 1))
         if line_count > 0 then

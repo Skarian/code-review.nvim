@@ -137,9 +137,6 @@ function M.quit()
   if s.composer then
     require("code-review.composer").close()
   end
-  if s.editor and s.editor.buf and vim.api.nvim_buf_is_valid(s.editor.buf) then
-    pcall(vim.api.nvim_buf_delete, s.editor.buf, { force = true })
-  end
   require("code-review.highlights").clear_all()
   if s.stale_timer and not s.stale_timer:is_closing() then
     s.stale_timer:stop()

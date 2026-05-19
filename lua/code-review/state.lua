@@ -8,11 +8,8 @@ local state = {
   root_hash = nil,
   store = nil,
   active_review_id = nil,
-  current_comment_id = nil,
-  current_reference_index = 1,
   sidebar = nil,
   preview = nil,
-  editor = nil,
   composer = nil,
   mappings = {},
   augroup = nil,
@@ -49,8 +46,6 @@ function M.activate(root, root_hash, store, storage)
   state.store = store
   state.storage = storage
   state.active_review_id = store.last_active_review_id
-  state.current_comment_id = nil
-  state.current_reference_index = 1
 end
 
 function M.deactivate()
@@ -61,8 +56,6 @@ function M.deactivate()
   state.root_hash = nil
   state.store = nil
   state.active_review_id = nil
-  state.current_comment_id = nil
-  state.current_reference_index = 1
   state.storage = nil
   state.voice = nil
   state.composer = nil
@@ -76,7 +69,6 @@ function M.reset()
   state.active = false
   state.mode = "inactive"
   state.session_id = session_id
-  state.current_reference_index = 1
   state.mappings = {}
 end
 
