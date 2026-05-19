@@ -19,6 +19,35 @@ describe("comment composer", function()
     actions.add_reference()
   end
 
+  it("accepts Snacks.win when it is a callable table", function()
+    local previous = package.loaded.snacks
+    local called = false
+    package.loaded.snacks = {
+      win = setmetatable({}, {
+        __call = function(_, opts)
+          called = true
+          local win = vim.api.nvim_open_win(opts.buf, true, {
+            relative = "editor",
+            row = 1,
+            col = 1,
+            width = 20,
+            height = 4,
+            style = "minimal",
+          })
+          return { win = win, close = function(self) vim.api.nvim_win_close(self.win, true) end }
+        end,
+      }),
+      picker = { pick = function() end },
+    }
+    local buf = vim.api.nvim_create_buf(false, true)
+    local win, handle = require("code-review.ui").open_composer(buf)
+    assert.is_true(called)
+    assert.truthy(win)
+    handle:close()
+    pcall(vim.api.nvim_buf_delete, buf, { force = true })
+    package.loaded.snacks = previous
+  end)
+
   it("cancels new composer drafts without creating a comment", function()
     local code_review, actions, state, model = start_project()
     select_lines(actions, 1, 2)

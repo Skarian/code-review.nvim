@@ -1,11 +1,19 @@
 local M = {}
 
+local function callable(value)
+  if type(value) == "function" then
+    return true
+  end
+  local mt = type(value) == "table" and getmetatable(value) or nil
+  return type(mt) == "table" and type(mt.__call) == "function"
+end
+
 local function snacks()
   local ok, mod = pcall(require, "snacks")
   if not ok then
     error("code-review.nvim requires folke/snacks.nvim at runtime", 2)
   end
-  if type(mod.win) ~= "function" then
+  if not callable(mod.win) then
     error("code-review.nvim requires Snacks.win", 2)
   end
   return mod
@@ -16,7 +24,7 @@ local function picker()
   if type(mod.picker) == "table" and type(mod.picker.pick) == "function" then
     return mod.picker.pick
   end
-  if type(mod.picker) == "function" then
+  if callable(mod.picker) then
     return mod.picker
   end
   error("code-review.nvim requires Snacks.picker", 2)
