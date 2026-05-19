@@ -42,6 +42,23 @@ describe("sidebar", function()
     return code_review, state
   end
 
+  local function assert_direct_sidebar_close_recreates(command)
+    local code_review, state = start_sidebar_project()
+    code_review.start()
+    local code_win = vim.api.nvim_get_current_win()
+    local old_sidebar = state.get().sidebar
+    vim.api.nvim_set_current_win(old_sidebar.win)
+    local ok, err = pcall(vim.cmd, command)
+    assert.is_true(ok, tostring(err))
+    local recreated = vim.wait(500, function()
+      local sidebar = state.get().sidebar
+      return sidebar and vim.api.nvim_win_is_valid(sidebar.win) and sidebar.win ~= old_sidebar.win
+    end)
+    assert.is_true(recreated)
+    assert.equals(code_win, vim.api.nvim_get_current_win())
+    code_review.quit()
+  end
+
   it("keeps at most one sidebar throughout the Review lifecycle", function()
     local code_review = require("code-review")
     local config = require("code-review.config")
@@ -133,6 +150,14 @@ describe("sidebar", function()
     end
     vim.api.nvim_del_augroup_by_id(group)
     code_review.quit()
+  end)
+
+  it("recreates the sidebar after a direct window close", function()
+    assert_direct_sidebar_close_recreates("close")
+  end)
+
+  it("recreates the sidebar after a direct buffer delete", function()
+    assert_direct_sidebar_close_recreates("bdelete")
   end)
 
   it("centers the title and empty review message", function()

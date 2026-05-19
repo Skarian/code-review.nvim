@@ -7,6 +7,7 @@ local M = {}
 local ns = vim.api.nvim_create_namespace("code-review.nvim.sidebar")
 local pad = "  "
 local legend_height = 4
+local render_scheduled = false
 
 local function truncate_to_width(text, width)
   text = text or ""
@@ -66,6 +67,28 @@ end
 
 local function valid_buf(buf)
   return buf and vim.api.nvim_buf_is_valid(buf)
+end
+
+local function stale_sidebar(sidebar)
+  return sidebar and (not valid_win(sidebar.win) or not valid_buf(sidebar.buf))
+end
+
+local function schedule_render()
+  if render_scheduled then
+    return
+  end
+  render_scheduled = true
+  vim.schedule(function()
+    render_scheduled = false
+    local s = state.get()
+    if not s.active then
+      return
+    end
+    if stale_sidebar(s.sidebar) then
+      s.sidebar = nil
+    end
+    M.render()
+  end)
 end
 
 local function with_winenter_ignored(fn)
@@ -172,6 +195,10 @@ end
 function M.render()
   local s = state.get()
   if not s.active then
+    return
+  end
+  if stale_sidebar(s.sidebar) then
+    schedule_render()
     return
   end
   local buf = ensure()
