@@ -55,6 +55,15 @@ local function create_augroup()
       end
     end,
   })
+  vim.api.nvim_create_autocmd("QuitPre", {
+    group = s.augroup,
+    callback = function()
+      local current = state.get()
+      if current.active and current.sidebar and current.sidebar.buf == vim.api.nvim_get_current_buf() then
+        M.quit()
+      end
+    end,
+  })
   vim.api.nvim_create_autocmd({ "BufEnter", "TextChanged", "TextChangedI", "BufWritePost", "BufDelete", "BufUnload", "DirChanged", "VimResized", "WinResized" }, {
     group = s.augroup,
     callback = function(args)
