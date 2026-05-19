@@ -30,6 +30,18 @@ describe("sidebar", function()
     end
   end
 
+  local function start_sidebar_project()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" }, sidebar = { width = 32 } })
+    vim.cmd.edit(project .. "/x.lua")
+    return code_review, state
+  end
+
   it("keeps at most one sidebar throughout the Review lifecycle", function()
     local code_review = require("code-review")
     local config = require("code-review.config")
@@ -72,6 +84,55 @@ describe("sidebar", function()
 
     code_review.quit()
     assert_sidebar_count(0)
+  end)
+
+  it("creates the sidebar without publishing a WinEnter target", function()
+    local code_review, state = start_sidebar_project()
+    local entered = {}
+    local group = vim.api.nvim_create_augroup("code_review_sidebar_winenter_spec", { clear = true })
+    vim.api.nvim_create_autocmd("WinEnter", {
+      group = group,
+      callback = function()
+        entered[#entered + 1] = vim.api.nvim_get_current_win()
+      end,
+    })
+    local current = vim.api.nvim_get_current_win()
+    code_review.start()
+    local sidebar = state.get().sidebar
+    assert.equals(current, vim.api.nvim_get_current_win())
+    assert.equals("code-review-sidebar", vim.bo[sidebar.buf].filetype)
+    for _, win in ipairs(entered) do
+      assert.is_false(win == sidebar.win)
+    end
+    code_review.quit()
+    vim.api.nvim_del_augroup_by_id(group)
+  end)
+
+  it("suppresses sidebar WinEnter when eventignorewin is available", function()
+    local code_review, state = start_sidebar_project()
+    code_review.start()
+    local sidebar = state.get().sidebar
+    local has_eventignorewin = pcall(function()
+      return vim.wo[sidebar.win].eventignorewin
+    end)
+    if not has_eventignorewin then
+      code_review.quit()
+      return
+    end
+    local entered = {}
+    local group = vim.api.nvim_create_augroup("code_review_sidebar_manual_winenter_spec", { clear = true })
+    vim.api.nvim_create_autocmd("WinEnter", {
+      group = group,
+      callback = function()
+        entered[#entered + 1] = vim.api.nvim_get_current_win()
+      end,
+    })
+    vim.api.nvim_set_current_win(sidebar.win)
+    for _, win in ipairs(entered) do
+      assert.is_false(win == sidebar.win)
+    end
+    vim.api.nvim_del_augroup_by_id(group)
+    code_review.quit()
   end)
 
   it("centers the title and empty review message", function()

@@ -68,29 +68,52 @@ local function valid_buf(buf)
   return buf and vim.api.nvim_buf_is_valid(buf)
 end
 
+local function with_winenter_ignored(fn)
+  local previous = vim.o.eventignore
+  if previous ~= "all" and not vim.tbl_contains(vim.split(previous, ",", { plain = true }), "WinEnter") then
+    vim.o.eventignore = previous == "" and "WinEnter" or (previous .. ",WinEnter")
+  end
+  local ok, result = pcall(fn)
+  vim.o.eventignore = previous
+  if not ok then
+    error(result, 2)
+  end
+  return result
+end
+
+local function open_sidebar_window(buf)
+  local position = config.get().sidebar.position
+  return vim.api.nvim_open_win(buf, false, {
+    win = -1,
+    vertical = true,
+    split = position == "left" and "left" or "right",
+    width = config.get().sidebar.width,
+    noautocmd = true,
+  })
+end
+
 local function ensure()
   local s = state.get()
   if valid_win(s.sidebar and s.sidebar.win) and valid_buf(s.sidebar.buf) then
     return s.sidebar.buf, s.sidebar.win
   end
   local current = vim.api.nvim_get_current_win()
-  local position = config.get().sidebar.position
-  if position == "left" then
-    vim.cmd("topleft vertical new")
-  else
-    vim.cmd("botright vertical new")
-  end
-  local win = vim.api.nvim_get_current_win()
   local buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_win_set_buf(win, buf)
+  local win = with_winenter_ignored(function()
+    return open_sidebar_window(buf)
+  end)
   vim.api.nvim_win_set_width(win, config.get().sidebar.width)
   vim.wo[win].winfixwidth = true
+  pcall(function()
+    vim.wo[win].eventignorewin = "WinEnter"
+  end)
   vim.wo[win].number = false
   vim.wo[win].relativenumber = false
   vim.wo[win].signcolumn = "no"
   vim.wo[win].foldcolumn = "0"
   vim.wo[win].wrap = false
   vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].filetype = "code-review-sidebar"
   vim.bo[buf].buflisted = false
   vim.bo[buf].bufhidden = "wipe"
   vim.bo[buf].swapfile = false
@@ -98,8 +121,10 @@ local function ensure()
   vim.bo[buf].modifiable = false
   pcall(vim.api.nvim_buf_set_name, buf, "Code Review")
   s.sidebar = { buf = buf, win = win }
-  if valid_win(current) then
-    vim.api.nvim_set_current_win(current)
+  if valid_win(current) and vim.api.nvim_get_current_win() ~= current then
+    with_winenter_ignored(function()
+      vim.api.nvim_set_current_win(current)
+    end)
   end
   return buf, win
 end
