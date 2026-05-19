@@ -5,6 +5,60 @@ local time = require("code-review.time")
 
 local M = {}
 local ns = vim.api.nvim_create_namespace("code-review.nvim.sidebar")
+local pad = "  "
+local legend_height = 4
+
+local function truncate_to_width(text, width)
+  text = text or ""
+  if width <= 0 then
+    return ""
+  end
+  if vim.fn.strdisplaywidth(text) <= width then
+    return text
+  end
+  if width <= 3 then
+    return string.sub("...", 1, width)
+  end
+
+  local out = ""
+  for _, char in ipairs(vim.fn.split(text, "\\zs")) do
+    if vim.fn.strdisplaywidth(out .. char .. "...") > width then
+      break
+    end
+    out = out .. char
+  end
+  return out .. "..."
+end
+
+local function padded(line, width)
+  if line == "" then
+    return ""
+  end
+  if not width then
+    return pad .. line
+  end
+  return pad .. truncate_to_width(line, width - vim.fn.strdisplaywidth(pad))
+end
+
+local function center_line(text, width)
+  text = truncate_to_width(text, width)
+  local available = math.max(0, width - vim.fn.strdisplaywidth(text))
+  return string.rep(" ", math.floor(available / 2)) .. text
+end
+
+local function line_count_without_legend(height)
+  return height > legend_height and height - legend_height or height
+end
+
+local function legend_lines(width)
+  local rule_width = math.max(12, width - 4)
+  return {
+    center_line(string.rep("-", rule_width), width),
+    center_line("Keys: rr picker  ra ref", width),
+    center_line("rc edit    rs voice", width),
+    center_line("rp preview rq quit", width),
+  }
+end
 
 local function valid_win(win)
   return win and vim.api.nvim_win_is_valid(win)
@@ -31,6 +85,11 @@ local function ensure()
   vim.api.nvim_win_set_buf(win, buf)
   vim.api.nvim_win_set_width(win, config.get().sidebar.width)
   vim.wo[win].winfixwidth = true
+  vim.wo[win].number = false
+  vim.wo[win].relativenumber = false
+  vim.wo[win].signcolumn = "no"
+  vim.wo[win].foldcolumn = "0"
+  vim.wo[win].wrap = false
   vim.bo[buf].buftype = "nofile"
   vim.bo[buf].buflisted = false
   vim.bo[buf].bufhidden = "wipe"
@@ -45,16 +104,42 @@ local function ensure()
   return buf, win
 end
 
-local function truncate_body(body)
-  local lines = vim.split(body or "", "\n", { plain = true })
+local function wrap_preview_line(line, width)
   local out = {}
-  for i = 1, math.min(4, #lines) do
-    if lines[i] ~= "" then
-      out[#out + 1] = "  " .. lines[i]
+  local current = ""
+  for word in line:gmatch("%S+") do
+    if current == "" then
+      current = word
+    elseif vim.fn.strdisplaywidth(current .. " " .. word) <= width then
+      current = current .. " " .. word
+    else
+      out[#out + 1] = truncate_to_width(current, width)
+      current = word
     end
   end
-  if #lines > 4 then
-    out[#out + 1] = "  ..."
+  if current ~= "" then
+    out[#out + 1] = truncate_to_width(current, width)
+  end
+  return out
+end
+
+local function preview_body(body, width)
+  local lines = vim.split(body or "", "\n", { plain = true })
+  local out = {}
+  local body_pad = "  "
+  local available = width - vim.fn.strdisplaywidth(pad) - vim.fn.strdisplaywidth(body_pad)
+  if available <= 0 then
+    return out
+  end
+  for _, line in ipairs(lines) do
+    if line ~= "" then
+      for _, wrapped in ipairs(wrap_preview_line(line, available)) do
+        out[#out + 1] = body_pad .. wrapped
+        if #out == 4 then
+          return out
+        end
+      end
+    end
   end
   return out
 end
@@ -65,10 +150,14 @@ function M.render()
     return
   end
   local buf = ensure()
+  local win = s.sidebar and s.sidebar.win
+  local width = valid_win(win) and vim.api.nvim_win_get_width(win) or config.get().sidebar.width
+  local height = valid_win(win) and vim.api.nvim_win_get_height(win) or 0
+  local legend = legend_lines(width)
   local review = model.find_review(s.store, s.active_review_id)
   local lines = {
-    "Code Review",
-    review and ("Review: " .. review.name) or "No active review",
+    center_line("Code Review", width),
+    review and padded("Review: " .. review.name, width) or "",
     "",
   }
   local header_count = #lines
@@ -114,16 +203,9 @@ function M.render()
           content_highlights[#content_highlights + 1] = { line = #content_lines - 1, group = "CodeReviewSidebarStale" }
         end
       end
-      vim.list_extend(content_lines, truncate_body(comment.body))
+      vim.list_extend(content_lines, preview_body(comment.body, width))
       content_lines[#content_lines + 1] = ""
     end
-    local legend = {
-      string.rep("-", 24),
-      "Keys: rr picker  ra ref",
-      "      rc edit    rs voice",
-      "      rp preview rq quit",
-    }
-    local height = valid_win(s.sidebar and s.sidebar.win) and vim.api.nvim_win_get_height(s.sidebar.win) or 0
     local available = height > #legend and math.max(0, height - #legend - header_count) or #content_lines
     local start_line = 1
     if current_content_line and available > 0 and #content_lines > available then
@@ -132,28 +214,31 @@ function M.render()
     end
     local end_line = available > 0 and math.min(#content_lines, start_line + available - 1) or #content_lines
     for idx = start_line, end_line do
-      lines[#lines + 1] = content_lines[idx]
+      lines[#lines + 1] = padded(content_lines[idx], width)
     end
     for _, hl in ipairs(content_highlights) do
       if hl.line >= start_line - 1 and hl.line <= end_line - 1 then
         highlights[#highlights + 1] = { line = header_count + hl.line - start_line + 1, group = hl.group }
       end
     end
+  else
+    local content_height = math.max(0, line_count_without_legend(height) - #lines)
+    local top_padding = math.max(0, math.floor((content_height - 1) / 2))
+    for _ = 1, top_padding do
+      lines[#lines + 1] = ""
+    end
+    lines[#lines + 1] = center_line("No active review", width)
+    highlights[#highlights + 1] = { line = #lines - 1, group = "CodeReviewSidebarHeader" }
   end
-  local legend = {
-    string.rep("-", 24),
-    "Keys: rr picker  ra ref",
-    "      rc edit    rs voice",
-    "      rp preview rq quit",
-  }
-  local height = valid_win(s.sidebar and s.sidebar.win) and vim.api.nvim_win_get_height(s.sidebar.win) or 0
   if height > #legend and #lines > height - #legend then
     lines = vim.list_slice(lines, 1, height - #legend)
   end
   while height > #legend and #lines < height - #legend do
     lines[#lines + 1] = ""
   end
-  vim.list_extend(lines, legend)
+  for _, line in ipairs(legend) do
+    lines[#lines + 1] = line
+  end
   vim.bo[buf].modifiable = true
   vim.bo[buf].readonly = false
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)

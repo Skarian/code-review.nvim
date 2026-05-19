@@ -55,10 +55,12 @@ local function create_augroup()
       end
     end,
   })
-  vim.api.nvim_create_autocmd({ "BufEnter", "TextChanged", "TextChangedI", "BufWritePost", "BufDelete", "BufUnload", "DirChanged" }, {
+  vim.api.nvim_create_autocmd({ "BufEnter", "TextChanged", "TextChangedI", "BufWritePost", "BufDelete", "BufUnload", "DirChanged", "VimResized", "WinResized" }, {
     group = s.augroup,
     callback = function(args)
-      if args.event == "TextChanged" or args.event == "TextChangedI" then
+      if args.event == "VimResized" or args.event == "WinResized" then
+        require("code-review.sidebar").render()
+      elseif args.event == "TextChanged" or args.event == "TextChangedI" then
         debounce_stale_refresh(args.buf)
       else
         refresh_for_buffer(args.buf)
