@@ -68,7 +68,7 @@ end
 
 local function require_active()
   if not state.is_active() then
-    notify.warn("Start Review Mode with <leader>rr first.")
+    notify.warn("Start Review Mode with <leader>rR first.")
     return false
   end
   return true
@@ -265,6 +265,8 @@ function M.open_picker()
   end
   require("code-review.review_picker").open()
 end
+
+M.review_picker = M.open_picker
 
 function M.toggle_voice()
   if require_active() then

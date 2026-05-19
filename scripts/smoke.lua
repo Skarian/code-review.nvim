@@ -83,7 +83,9 @@ assert(vim.api.nvim_get_commands({})["CodeReview"], "CodeReview command missing"
 assert(vim.api.nvim_get_commands({})["CodeReviewHealth"], "CodeReviewHealth command missing")
 assert(vim.api.nvim_get_commands({})["CodeReviewClearData"], "CodeReviewClearData command missing")
 assert(vim.fn.maparg("<leader>r", "n") == "", "bare parent keymap must not be mapped")
-assert(vim.fn.maparg("<leader>rr", "n") ~= "", "open picker keymap missing")
+assert(vim.fn.maparg("<leader>rR", "n") ~= "", "review picker keymap missing")
+assert(vim.fn.maparg("<leader>rr", "x") ~= "", "append reference keymap missing")
+assert(vim.fn.maparg("<leader>rr", "n") == "", "normal append keymap should not be mapped")
 assert(vim.fn.maparg("<leader>ra", "x") ~= "", "add reference keymap missing")
 
 code_review.start()

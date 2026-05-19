@@ -7,17 +7,10 @@ local defaults = {}
 local plugs_done = false
 
 local actions = {
-  open_picker = { mode = "n", plug = "<Plug>(code-review-open-picker)", desc = "Review picker" },
-  new_comment = { mode = "n", plug = "<Plug>(code-review-new-comment)", desc = "New comment" },
-  add_reference = { mode = "x", plug = "<Plug>(code-review-add-reference)", desc = "Add file reference" },
-  edit_comment = { mode = "n", plug = "<Plug>(code-review-edit-comment)", desc = "Edit comment" },
-  toggle_voice = { mode = "n", plug = "<Plug>(code-review-toggle-voice)", desc = "Toggle voice" },
-  next = { mode = "n", plug = "<Plug>(code-review-next)", desc = "Next" },
-  previous = { mode = "n", plug = "<Plug>(code-review-previous)", desc = "Previous" },
-  open_current = { mode = "n", plug = "<Plug>(code-review-open-current)", desc = "Open current" },
-  delete_reference = { mode = "n", plug = "<Plug>(code-review-delete-reference)", desc = "Delete file reference" },
-  delete_comment = { mode = "n", plug = "<Plug>(code-review-delete-comment)", desc = "Delete comment" },
-  close_comment = { mode = "n", plug = "<Plug>(code-review-close-comment)", desc = "Close comment" },
+  review_picker = { mode = "n", plug = "<Plug>(code-review-review-picker)", desc = "Review picker" },
+  add_reference = { mode = "x", plug = "<Plug>(code-review-add-reference)", desc = "New comment from selection" },
+  append_reference = { mode = "x", plug = "<Plug>(code-review-append-reference)", desc = "Append selection to comment" },
+  edit_comment = { mode = "n", plug = "<Plug>(code-review-edit-comment)", desc = "Edit comments" },
   preview = { mode = "n", plug = "<Plug>(code-review-preview)", desc = "Preview" },
   quit = { mode = "n", plug = "<Plug>(code-review-quit)", desc = "Quit Review Mode" },
 }

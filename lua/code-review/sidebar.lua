@@ -54,8 +54,8 @@ local function legend_lines(width)
   local rule_width = math.max(12, width - 4)
   return {
     center_line(string.rep("-", rule_width), width),
-    center_line("Keys: rr picker  ra ref", width),
-    center_line("rc edit    rs voice", width),
+    center_line("Keys: ra new   rr append", width),
+    center_line("re edit   rR reviews", width),
     center_line("rp preview rq quit", width),
   }
 end
