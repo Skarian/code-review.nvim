@@ -134,6 +134,9 @@ function M.quit()
   end
   require("code-review.sidebar").close()
   require("code-review.preview").close()
+  if s.composer then
+    require("code-review.composer").close()
+  end
   if s.editor and s.editor.buf and vim.api.nvim_buf_is_valid(s.editor.buf) then
     pcall(vim.api.nvim_buf_delete, s.editor.buf, { force = true })
   end

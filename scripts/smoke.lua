@@ -7,6 +7,31 @@ vim.notify = function(message, level)
   notifications[#notifications + 1] = { message = tostring(message), level = level }
 end
 
+package.preload["snacks"] = function()
+  return {
+    win = function(opts)
+      local win = vim.api.nvim_open_win(opts.buf, true, {
+        relative = "editor",
+        row = 1,
+        col = 1,
+        width = math.min(opts.width or 80, math.max(20, vim.o.columns - 4)),
+        height = math.min(opts.height or 16, math.max(3, vim.o.lines - 4)),
+        style = "minimal",
+        border = "single",
+      })
+      return {
+        win = win,
+        buf = opts.buf,
+        close = function(self)
+          if vim.api.nvim_win_is_valid(self.win) then
+            vim.api.nvim_win_close(self.win, true)
+          end
+        end,
+      }
+    end,
+  }
+end
+
 local function assert_contains(haystack, needle, message)
   assert(tostring(haystack):find(needle, 1, true), message or ("missing: " .. needle))
 end
@@ -59,15 +84,18 @@ actions.add_reference()
 
 local s = state.get()
 local review = model.find_review(s.store, s.active_review_id)
-local comment = model.find_comment(review, s.current_comment_id)
-assert(comment and #comment.file_references == 1, "visual File Reference was not added")
+assert(s.composer and #s.composer.references == 1, "visual File Reference draft was not added")
 
 actions.preview()
-assert(state.mode() ~= "preview", "preview should be blocked while Comment is incomplete")
-assert_contains(last_notification(), "1 incomplete comments", "missing incomplete Comment notification")
+assert(state.mode() ~= "preview", "preview should be blocked while the composer is open")
+assert_contains(last_notification(), "composer", "missing composer notification")
 
-comment.body = "Check this calculation."
-model.touch_comment(review, comment)
+vim.api.nvim_buf_set_lines(state.get().composer.buf, state.get().composer.body_start, -1, false, { "Check this calculation." })
+require("code-review.composer").submit()
+s = state.get()
+review = model.find_review(s.store, s.active_review_id)
+local comment = model.find_comment(review, s.current_comment_id)
+assert(comment and #comment.file_references == 1, "submitted Comment was not persisted")
 
 actions.preview()
 assert(state.mode() == "preview", "preview did not open")

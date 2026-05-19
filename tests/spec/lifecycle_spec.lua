@@ -30,11 +30,11 @@ describe("lifecycle and keymaps", function()
     vim.fn.setpos("'<", { 0, 1, 1, 0 })
     vim.fn.setpos("'>", { 0, 2, 1, 0 })
     actions.add_reference()
+    vim.api.nvim_buf_set_lines(state.get().composer.buf, state.get().composer.body_start, -1, false, { "Please check this." })
+    require("code-review.composer").submit()
     local review = require("code-review.model").find_review(state.get().store, state.get().active_review_id)
     local comment = review.comments[1]
     assert.equals(1, #comment.file_references)
-    comment.body = "Please check this."
-    require("code-review.model").touch_comment(review, comment)
     actions.preview()
     assert.equals("preview", state.mode())
     local text = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n")
@@ -64,12 +64,13 @@ describe("lifecycle and keymaps", function()
     vim.api.nvim_win_set_cursor(0, { 4, 0 })
     vim.cmd("normal Vj\\ra")
 
-    local review = model.find_review(state.get().store, state.get().active_review_id)
-    local ref = review.comments[1].file_references[1]
+    local ref = state.get().composer.references[1]
     assert.equals(4, ref.start_line)
     assert.equals(5, ref.end_line)
     assert.same({ "four", "five" }, ref.selected_lines_snapshot)
     assert.equals("n", vim.api.nvim_get_mode().mode)
+    assert.equals(0, #model.find_review(state.get().store, state.get().active_review_id).comments)
+    require("code-review.composer").cancel()
 
     code_review.quit()
   end)

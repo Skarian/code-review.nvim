@@ -18,6 +18,33 @@ end
 
 runtime_plugin_loaded = false
 
+package.preload["snacks"] = function()
+  return {
+    win = function(opts)
+      local width = opts.width or 80
+      local height = opts.height or 16
+      local win = vim.api.nvim_open_win(opts.buf, true, {
+        relative = "editor",
+        row = 1,
+        col = 1,
+        width = math.min(width, math.max(20, vim.o.columns - 4)),
+        height = math.min(height, math.max(3, vim.o.lines - 4)),
+        style = "minimal",
+        border = "single",
+      })
+      return {
+        win = win,
+        buf = opts.buf,
+        close = function(self)
+          if vim.api.nvim_win_is_valid(self.win) then
+            vim.api.nvim_win_close(self.win, true)
+          end
+        end,
+      }
+    end,
+  }
+end
+
 local function run_specs(dir)
   local failures = {}
   local total = 0

@@ -50,12 +50,12 @@ describe("sidebar", function()
     vim.fn.setpos("'<", { 0, 1, 1, 0 })
     vim.fn.setpos("'>", { 0, 1, 1, 0 })
     actions.add_reference()
+    local state = require("code-review.state")
+    vim.api.nvim_buf_set_lines(state.get().composer.buf, state.get().composer.body_start, -1, false, { "ready" })
+    require("code-review.composer").submit()
     assert_sidebar_count(1)
 
-    local state = require("code-review.state")
     local review = model.find_review(state.get().store, state.get().active_review_id)
-    review.comments[1].body = "ready"
-    model.touch_comment(review, review.comments[1])
     actions.preview()
     assert_sidebar_count(1)
 

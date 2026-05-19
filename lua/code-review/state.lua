@@ -13,6 +13,7 @@ local state = {
   sidebar = nil,
   preview = nil,
   editor = nil,
+  composer = nil,
   mappings = {},
   augroup = nil,
   storage = nil,
@@ -64,6 +65,7 @@ function M.deactivate()
   state.current_reference_index = 1
   state.storage = nil
   state.voice = nil
+  state.composer = nil
 end
 
 function M.reset()

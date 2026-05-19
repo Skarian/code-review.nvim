@@ -25,6 +25,10 @@ local function current_buffer_allows_action(action)
     notify.warn("Submit or cancel the comment composer first.")
     return false
   end
+  if s.composer and s.composer.buf == bufnr then
+    notify.warn("Submit or cancel the comment composer first.")
+    return false
+  end
   local bt = vim.bo[bufnr].buftype
   if bt ~= "" then
     notify.warn("Code Review actions run from normal file buffers.")
@@ -140,25 +144,6 @@ function M.delete_review()
   end)
 end
 
-local function ensure_comment()
-  local s = state.get()
-  local review = active_review()
-  if not review then
-    notify.warn("Create or select a Review first.")
-    return nil
-  end
-  if s.current_comment_id then
-    return model.find_comment(review, s.current_comment_id), review
-  end
-  local comment = model.new_comment()
-  table.insert(review.comments, comment)
-  model.touch_review(review)
-  s.current_comment_id = comment.id
-  s.current_reference_index = 1
-  state.set_mode("comment_list")
-  return comment, review
-end
-
 local function visual_range()
   local mode = vim.api.nvim_get_mode().mode
   if mode == "v" or mode == "V" or mode == "\022" then
@@ -188,6 +173,10 @@ function M.add_reference()
   if blocked_by_editor_or_voice() then
     return
   end
+  if not active_review() then
+    notify.warn("Create or select a Review first.")
+    return
+  end
   local bufnr = vim.api.nvim_get_current_buf()
   if vim.bo[bufnr].buftype ~= "" or vim.api.nvim_buf_get_name(bufnr) == "" then
     notify.warn("Save the buffer before adding a File Reference.")
@@ -208,22 +197,13 @@ function M.add_reference()
     return
   end
   local snapshot = vim.api.nvim_buf_get_lines(bufnr, start_line - 1, end_line, false)
-  local comment, review = ensure_comment()
-  if not comment then
-    return
-  end
   local ref = model.new_file_reference({
     relative_path = rel,
     start_line = start_line,
     end_line = end_line,
     selected_lines_snapshot = snapshot,
   })
-  table.insert(comment.file_references, ref)
-  s.current_comment_id = comment.id
-  s.current_reference_index = #comment.file_references
-  state.set_mode("comment_list")
-  model.touch_comment(review, comment)
-  persist()
+  require("code-review.composer").open_new(ref)
 end
 
 function M.new_comment()
