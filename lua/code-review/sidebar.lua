@@ -1,12 +1,13 @@
 local config = require("code-review.config")
 local model = require("code-review.model")
+local path = require("code-review.path")
 local state = require("code-review.state")
 local time = require("code-review.time")
 
 local M = {}
 local ns = vim.api.nvim_create_namespace("code-review.nvim.sidebar")
 local pad = "  "
-local legend_height = 4
+local footer_height = 5
 local render_scheduled = false
 
 local function truncate_to_width(text, width)
@@ -47,17 +48,18 @@ local function center_line(text, width)
   return string.rep(" ", math.floor(available / 2)) .. text
 end
 
-local function line_count_without_legend(height)
-  return height > legend_height and height - legend_height or height
+local function statusline_escape(text)
+  return (text or ""):gsub("%%", "%%%%")
 end
 
-local function legend_lines(width)
+local function footer_lines(width)
   local rule_width = math.max(12, width - 4)
   return {
     center_line(string.rep("-", rule_width), width),
-    center_line("Keys: ra new   rr append", width),
-    center_line("re edit   rR reviews", width),
-    center_line("rp preview rq quit", width),
+    center_line("ra new   rr append   re edit", width),
+    center_line("rR reviews   rp preview", width),
+    center_line("j/k scroll   Ctrl-D/Ctrl-U page", width),
+    center_line("q quit", width),
   }
 end
 
@@ -69,26 +71,18 @@ local function valid_buf(buf)
   return buf and vim.api.nvim_buf_is_valid(buf)
 end
 
-local function stale_sidebar(sidebar)
-  return sidebar and (not valid_win(sidebar.win) or not valid_buf(sidebar.buf))
+local function sidebar_buf(sidebar, bufnr)
+  return sidebar and (sidebar.buf == bufnr or sidebar.footer_buf == bufnr)
 end
 
-local function schedule_render()
-  if render_scheduled then
-    return
-  end
-  render_scheduled = true
-  vim.schedule(function()
-    render_scheduled = false
-    local s = state.get()
-    if not s.active then
-      return
-    end
-    if stale_sidebar(s.sidebar) then
-      s.sidebar = nil
-    end
-    M.render()
-  end)
+local function stale_sidebar(sidebar)
+  return sidebar
+    and (
+      not valid_win(sidebar.win)
+      or not valid_buf(sidebar.buf)
+      or not valid_win(sidebar.footer_win)
+      or not valid_buf(sidebar.footer_buf)
+    )
 end
 
 local function with_winenter_ignored(fn)
@@ -104,6 +98,38 @@ local function with_winenter_ignored(fn)
   return result
 end
 
+local function apply_window_options(win)
+  vim.wo[win].number = false
+  vim.wo[win].relativenumber = false
+  vim.wo[win].signcolumn = "no"
+  vim.wo[win].foldcolumn = "0"
+  vim.wo[win].wrap = false
+  vim.wo[win].cursorline = false
+  vim.wo[win].spell = false
+  pcall(function()
+    vim.wo[win].eventignorewin = "WinEnter"
+  end)
+end
+
+local function apply_buffer_options(buf, filetype)
+  vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].filetype = filetype
+  vim.bo[buf].buflisted = false
+  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].swapfile = false
+  vim.bo[buf].readonly = true
+  vim.bo[buf].modifiable = false
+end
+
+local function set_readonly_lines(buf, lines)
+  vim.bo[buf].modifiable = true
+  vim.bo[buf].readonly = false
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modified = false
+  vim.bo[buf].modifiable = false
+  vim.bo[buf].readonly = true
+end
+
 local function open_sidebar_window(buf)
   local position = config.get().sidebar.position
   return vim.api.nvim_open_win(buf, false, {
@@ -115,41 +141,75 @@ local function open_sidebar_window(buf)
   })
 end
 
+local function open_footer_window(content_win, footer_buf)
+  return vim.api.nvim_open_win(footer_buf, false, {
+    win = content_win,
+    split = "below",
+    height = footer_height,
+    noautocmd = true,
+  })
+end
+
+local function apply_sidebar_keymaps(buf)
+  vim.keymap.set("n", "q", function()
+    require("code-review").quit()
+  end, { buffer = buf, nowait = true, desc = "Quit Review Mode" })
+end
+
 local function ensure()
   local s = state.get()
-  if valid_win(s.sidebar and s.sidebar.win) and valid_buf(s.sidebar.buf) then
-    return s.sidebar.buf, s.sidebar.win
+  if valid_win(s.sidebar and s.sidebar.win) and valid_buf(s.sidebar.buf) and valid_win(s.sidebar.footer_win) and valid_buf(s.sidebar.footer_buf) then
+    return s.sidebar.buf, s.sidebar.win, s.sidebar.footer_buf, s.sidebar.footer_win
   end
+  local previous_filter = s.sidebar and s.sidebar.filter or nil
   local current = vim.api.nvim_get_current_win()
   local buf = vim.api.nvim_create_buf(false, true)
   local win = with_winenter_ignored(function()
     return open_sidebar_window(buf)
   end)
-  vim.api.nvim_win_set_width(win, config.get().sidebar.width)
-  vim.wo[win].winfixwidth = true
-  pcall(function()
-    vim.wo[win].eventignorewin = "WinEnter"
+  local footer_bufnr = vim.api.nvim_create_buf(false, true)
+  local footer_win = with_winenter_ignored(function()
+    return open_footer_window(win, footer_bufnr)
   end)
-  vim.wo[win].number = false
-  vim.wo[win].relativenumber = false
-  vim.wo[win].signcolumn = "no"
-  vim.wo[win].foldcolumn = "0"
-  vim.wo[win].wrap = false
-  vim.bo[buf].buftype = "nofile"
-  vim.bo[buf].filetype = "code-review-sidebar"
-  vim.bo[buf].buflisted = false
-  vim.bo[buf].bufhidden = "wipe"
-  vim.bo[buf].swapfile = false
-  vim.bo[buf].readonly = true
-  vim.bo[buf].modifiable = false
+  vim.api.nvim_win_set_width(win, config.get().sidebar.width)
+  vim.api.nvim_win_set_width(footer_win, config.get().sidebar.width)
+  vim.wo[win].winfixwidth = true
+  vim.wo[footer_win].winfixwidth = true
+  vim.wo[footer_win].winfixheight = true
+  apply_window_options(win)
+  apply_window_options(footer_win)
+  vim.wo[footer_win].winbar = ""
+  apply_buffer_options(buf, "code-review-sidebar")
+  apply_buffer_options(footer_bufnr, "code-review-sidebar-footer")
   pcall(vim.api.nvim_buf_set_name, buf, "Code Review")
-  s.sidebar = { buf = buf, win = win }
+  pcall(vim.api.nvim_buf_set_name, footer_bufnr, "Code Review Footer")
+  apply_sidebar_keymaps(buf)
+  apply_sidebar_keymaps(footer_bufnr)
+  s.sidebar = { buf = buf, win = win, footer_buf = footer_bufnr, footer_win = footer_win, filter = previous_filter }
   if valid_win(current) and vim.api.nvim_get_current_win() ~= current then
     with_winenter_ignored(function()
       vim.api.nvim_set_current_win(current)
     end)
   end
-  return buf, win
+  return buf, win, footer_bufnr, footer_win
+end
+
+local function schedule_render()
+  if render_scheduled then
+    return
+  end
+  render_scheduled = true
+  vim.schedule(function()
+    render_scheduled = false
+    local s = state.get()
+    if not s.active then
+      return
+    end
+    if stale_sidebar(s.sidebar) then
+      M.close()
+    end
+    M.render()
+  end)
 end
 
 local function wrap_preview_line(line, width)
@@ -192,35 +252,47 @@ local function preview_body(body, width)
   return out
 end
 
-function M.render()
-  local s = state.get()
-  if not s.active then
-    return
+local function filter_comments(comments, filter)
+  if not filter or not filter.ids then
+    return comments
   end
-  if stale_sidebar(s.sidebar) then
-    schedule_render()
-    return
+  local allowed = {}
+  for _, id in ipairs(filter.ids) do
+    allowed[id] = true
   end
-  local buf = ensure()
-  local win = s.sidebar and s.sidebar.win
-  local width = valid_win(win) and vim.api.nvim_win_get_width(win) or config.get().sidebar.width
-  local height = valid_win(win) and vim.api.nvim_win_get_height(win) or 0
-  local legend = legend_lines(width)
-  local review = model.find_review(s.store, s.active_review_id)
-  local lines = {
-    center_line("Code Review", width),
-    review and padded("Review: " .. review.name, width) or "",
-    "",
-  }
-  local header_count = #lines
-  local highlights = {
-    { line = 0, group = "CodeReviewSidebarHeader" },
-    { line = 1, group = "CodeReviewSidebarHeader" },
-  }
+  local out = {}
+  for _, comment in ipairs(comments) do
+    if allowed[comment.id] then
+      out[#out + 1] = comment
+    end
+  end
+  return out
+end
+
+local function build_header(review, filter, width)
+  local prefix = "Code Review"
+  if not review then
+    return truncate_to_width(" " .. prefix .. " | No active review ", width)
+  end
+  if filter and filter.count == 1 then
+    local label = "Matching comment"
+    local full = " " .. prefix .. " | " .. label .. " "
+    return vim.fn.strdisplaywidth(full) <= width and full or truncate_to_width(" " .. label .. " ", width)
+  elseif filter and filter.count and filter.count > 1 then
+    local label = "Matching comments: " .. filter.count
+    local full = " " .. prefix .. " | " .. label .. " "
+    return vim.fn.strdisplaywidth(full) <= width and full or truncate_to_width(" " .. label .. " ", width)
+  end
+  return truncate_to_width(" " .. prefix .. " | Review: " .. review.name .. " ", width)
+end
+
+local function build_lines(review, filter, width)
+  local content_width = math.max(1, width)
+  local lines = {}
+  local highlights = {}
+  local metadata = { comment_lines = {} }
   if review then
-    local comments = model.comments_newest(review)
-    local content_lines = {}
-    local content_highlights = {}
+    local comments = filter_comments(model.comments_newest(review), filter)
     for _, comment in ipairs(comments) do
       local flags = {}
       local incomplete = not model.comment_complete(comment)
@@ -235,71 +307,164 @@ function M.render()
           break
         end
       end
-      content_lines[#content_lines + 1] = time.relative(comment.updated_at) .. (#flags > 0 and (" [" .. table.concat(flags, ", ") .. "]") or "")
-      local comment_line = #content_lines - 1
+      lines[#lines + 1] = padded(time.relative(comment.updated_at) .. (#flags > 0 and (" [" .. table.concat(flags, ", ") .. "]") or ""), content_width)
+      metadata.comment_lines[comment.id] = #lines
       if incomplete then
-        content_highlights[#content_highlights + 1] = { line = comment_line, group = "CodeReviewSidebarIncomplete" }
+        highlights[#highlights + 1] = { line = #lines - 1, group = "CodeReviewSidebarIncomplete" }
       elseif stale then
-        content_highlights[#content_highlights + 1] = { line = comment_line, group = "CodeReviewSidebarStale" }
+        highlights[#highlights + 1] = { line = #lines - 1, group = "CodeReviewSidebarStale" }
       end
       for _, ref in ipairs(comment.file_references or {}) do
-        content_lines[#content_lines + 1] = string.format("  %s:%d-%d%s", ref.relative_path, ref.start_line, ref.end_line, ref.stale_state == "stale" and " !" or "")
+        lines[#lines + 1] = padded(string.format("  %s:%d-%d%s", ref.relative_path, ref.start_line, ref.end_line, ref.stale_state == "stale" and " !" or ""), content_width)
         if ref.stale_state == "stale" then
-          content_highlights[#content_highlights + 1] = { line = #content_lines - 1, group = "CodeReviewSidebarStale" }
+          highlights[#highlights + 1] = { line = #lines - 1, group = "CodeReviewSidebarStale" }
         end
       end
-      vim.list_extend(content_lines, preview_body(comment.body, width))
-      content_lines[#content_lines + 1] = ""
-    end
-    local available = height > #legend and math.max(0, height - #legend - header_count) or #content_lines
-    local start_line = 1
-    local end_line = available > 0 and math.min(#content_lines, start_line + available - 1) or #content_lines
-    for idx = start_line, end_line do
-      lines[#lines + 1] = padded(content_lines[idx], width)
-    end
-    for _, hl in ipairs(content_highlights) do
-      if hl.line >= start_line - 1 and hl.line <= end_line - 1 then
-        highlights[#highlights + 1] = { line = header_count + hl.line - start_line + 1, group = hl.group }
+      for _, body_line in ipairs(preview_body(comment.body, content_width)) do
+        lines[#lines + 1] = padded(body_line, content_width)
       end
-    end
-  else
-    local content_height = math.max(0, line_count_without_legend(height) - #lines)
-    local top_padding = math.max(0, math.floor((content_height - 1) / 2))
-    for _ = 1, top_padding do
       lines[#lines + 1] = ""
     end
-    lines[#lines + 1] = center_line("No active review", width)
+    if #comments == 0 then
+      lines[#lines + 1] = center_line("No matching comments", content_width)
+      highlights[#highlights + 1] = { line = #lines - 1, group = "CodeReviewSidebarHeader" }
+    end
+  else
+    lines[#lines + 1] = center_line("No active review", content_width)
     highlights[#highlights + 1] = { line = #lines - 1, group = "CodeReviewSidebarHeader" }
   end
-  if height > #legend and #lines > height - #legend then
-    lines = vim.list_slice(lines, 1, height - #legend)
+  if #lines == 0 then
+    lines[1] = ""
   end
-  while height > #legend and #lines < height - #legend do
-    lines[#lines + 1] = ""
-  end
-  for _, line in ipairs(legend) do
-    lines[#lines + 1] = line
-  end
-  vim.bo[buf].modifiable = true
-  vim.bo[buf].readonly = false
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  return lines, highlights, metadata
+end
+
+local function apply_highlights(buf, highlights)
   vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
   for _, hl in ipairs(highlights) do
-    if hl.line < #lines then
-      pcall(vim.api.nvim_buf_add_highlight, buf, ns, hl.group, hl.line, 0, -1)
+    pcall(vim.api.nvim_buf_add_highlight, buf, ns, hl.group, hl.line, 0, -1)
+  end
+end
+
+local function same_filter(a, b)
+  local a_ids = a and a.ids or nil
+  local b_ids = b and b.ids or nil
+  if not a_ids and not b_ids then
+    return true
+  end
+  if not a_ids or not b_ids or #a_ids ~= #b_ids then
+    return false
+  end
+  for index, id in ipairs(a_ids) do
+    if b_ids[index] ~= id then
+      return false
     end
   end
-  vim.bo[buf].modifiable = false
-  vim.bo[buf].readonly = true
+  return true
+end
+
+local function set_filter(filter)
+  local s = state.get()
+  if stale_sidebar(s.sidebar) then
+    s.sidebar = nil
+  end
+  if not s.sidebar then
+    return
+  end
+  if same_filter(s.sidebar.filter, filter) then
+    return
+  end
+  s.sidebar.filter = filter
+  M.render()
+end
+
+function M.clear_filter()
+  set_filter(nil)
+end
+
+function M.update_filter_for_buffer(bufnr)
+  if not state.is_active() then
+    return
+  end
+  local s = state.get()
+  if sidebar_buf(s.sidebar, bufnr) then
+    M.clear_filter()
+    return
+  end
+  if not vim.api.nvim_buf_is_valid(bufnr) or vim.bo[bufnr].buftype ~= "" then
+    return
+  end
+  local name = vim.api.nvim_buf_get_name(bufnr)
+  if name == "" then
+    return
+  end
+  local rel = path.relative(s.root, name)
+  if not rel then
+    M.clear_filter()
+    return
+  end
+  local review = model.find_review(s.store, s.active_review_id)
+  if not review then
+    M.clear_filter()
+    return
+  end
+  local line = vim.api.nvim_win_get_cursor(0)[1]
+  local matches = {}
+  for _, comment in ipairs(model.comments_newest(review)) do
+    for _, ref in ipairs(comment.file_references or {}) do
+      if ref.relative_path == rel and line >= ref.start_line and line <= ref.end_line then
+        matches[#matches + 1] = comment.id
+        break
+      end
+    end
+  end
+  if #matches == 0 then
+    M.clear_filter()
+  else
+    set_filter({ ids = matches, count = #matches })
+  end
+end
+
+function M.render()
+  local s = state.get()
+  if not s.active then
+    return
+  end
+  if stale_sidebar(s.sidebar) then
+    schedule_render()
+    return
+  end
+  local buf, win, footer_buf = ensure()
+  local width = valid_win(win) and vim.api.nvim_win_get_width(win) or config.get().sidebar.width
+  local review = model.find_review(s.store, s.active_review_id)
+  local filter = s.sidebar and s.sidebar.filter or nil
+  local view = valid_win(win) and vim.api.nvim_win_call(win, vim.fn.winsaveview) or nil
+  local lines, highlights, metadata = build_lines(review, filter, width)
+  vim.wo[win].winbar = "%#CodeReviewSidebarHeader#" .. statusline_escape(build_header(review, filter, width))
+  set_readonly_lines(buf, lines)
+  apply_highlights(buf, highlights)
+  set_readonly_lines(footer_buf, footer_lines(width))
+  if view and valid_win(win) then
+    pcall(vim.api.nvim_win_call, win, function()
+      vim.fn.winrestview(view)
+    end)
+  end
+  s.sidebar.metadata = metadata
+  pcall(vim.cmd.redrawstatus)
 end
 
 function M.close()
   local s = state.get()
   if s.sidebar then
-    if valid_win(s.sidebar.win) then
-      pcall(vim.api.nvim_win_close, s.sidebar.win, true)
-    elseif valid_buf(s.sidebar.buf) then
-      pcall(vim.api.nvim_buf_delete, s.sidebar.buf, { force = true })
+    for _, win in ipairs({ s.sidebar.footer_win, s.sidebar.win }) do
+      if valid_win(win) then
+        pcall(vim.api.nvim_win_close, win, true)
+      end
+    end
+    for _, buf in ipairs({ s.sidebar.footer_buf, s.sidebar.buf }) do
+      if valid_buf(buf) then
+        pcall(vim.api.nvim_buf_delete, buf, { force = true })
+      end
     end
   end
   s.sidebar = nil

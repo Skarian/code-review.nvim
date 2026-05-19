@@ -42,17 +42,20 @@ describe("sidebar", function()
     return code_review, state
   end
 
-  local function assert_direct_sidebar_close_recreates(command)
+  local function assert_direct_sidebar_close_recreates(command, target)
     local code_review, state = start_sidebar_project()
     code_review.start()
     local code_win = vim.api.nvim_get_current_win()
     local old_sidebar = state.get().sidebar
-    vim.api.nvim_set_current_win(old_sidebar.win)
+    vim.api.nvim_set_current_win(target == "footer" and old_sidebar.footer_win or old_sidebar.win)
     local ok, err = pcall(vim.cmd, command)
     assert.is_true(ok, tostring(err))
     local recreated = vim.wait(500, function()
       local sidebar = state.get().sidebar
-      return sidebar and vim.api.nvim_win_is_valid(sidebar.win) and sidebar.win ~= old_sidebar.win
+      return sidebar
+        and vim.api.nvim_win_is_valid(sidebar.win)
+        and vim.api.nvim_win_is_valid(sidebar.footer_win)
+        and sidebar.win ~= old_sidebar.win
     end)
     assert.is_true(recreated)
     assert.equals(code_win, vim.api.nvim_get_current_win())
@@ -160,6 +163,14 @@ describe("sidebar", function()
     assert_direct_sidebar_close_recreates("bdelete")
   end)
 
+  it("recreates the sidebar after a direct footer window close", function()
+    assert_direct_sidebar_close_recreates("close", "footer")
+  end)
+
+  it("recreates the sidebar after a direct footer buffer delete", function()
+    assert_direct_sidebar_close_recreates("bdelete", "footer")
+  end)
+
   it("exits Review Mode when quitting from the sidebar", function()
     local code_review, state = start_sidebar_project()
     code_review.start()
@@ -174,7 +185,7 @@ describe("sidebar", function()
     assert.equals(code_win, vim.api.nvim_get_current_win())
   end)
 
-  it("centers the title and empty review message", function()
+  it("shows fixed header chrome and centers the empty review message", function()
     local code_review = require("code-review")
     local config = require("code-review.config")
     local state = require("code-review.state")
@@ -187,26 +198,23 @@ describe("sidebar", function()
 
     local sidebar = state.get().sidebar
     local width = vim.api.nvim_win_get_width(sidebar.win)
-    local height = vim.api.nvim_win_get_height(sidebar.win)
     local lines = vim.api.nvim_buf_get_lines(sidebar.buf, 0, -1, false)
-    assert.is_true(is_centered(lines[1], "Code Review", width))
+    assert.truthy(vim.wo[sidebar.win].winbar:find("Code Review", 1, true))
 
     local empty_line
     for index, line in ipairs(lines) do
       if line:find("No active review", 1, true) then
         empty_line = index
-        assert.is_true(is_centered(line, "No active review", width))
+        assert.is_true(is_centered(line, "No active review", width - 1))
         break
       end
     end
     assert.truthy(empty_line)
-    assert.truthy(empty_line > 2)
-    assert.truthy(empty_line < height - 4)
 
     code_review.quit()
   end)
 
-  it("defines sidebar highlight groups and keeps legend at window bottom", function()
+  it("defines sidebar highlight groups and keeps legend fixed in the footer", function()
     local code_review = require("code-review")
     local config = require("code-review.config")
     local actions = require("code-review.actions")
@@ -226,11 +234,11 @@ describe("sidebar", function()
     require("code-review.sidebar").render()
     local sidebar = state.get().sidebar
     local width = vim.api.nvim_win_get_width(sidebar.win)
-    local height = vim.api.nvim_win_get_height(sidebar.win)
-    local lines = vim.api.nvim_buf_get_lines(sidebar.buf, 0, -1, false)
-    assert.is_true(is_centered(lines[height], "rp preview rq quit", width))
-    assert.truthy(lines[height - 1]:find("re edit", 1, true))
-    assert.is_true(lines[height - 3]:find("%-%-") ~= nil)
+    local footer_lines = vim.api.nvim_buf_get_lines(sidebar.footer_buf, 0, -1, false)
+    assert.is_true(is_centered(footer_lines[2], "ra new   rr append   re edit", width))
+    assert.truthy(footer_lines[3]:find("rR reviews", 1, true))
+    assert.truthy(footer_lines[4]:find("j/k scroll", 1, true))
+    assert.is_true(is_centered(footer_lines[5], "q quit", width))
     assert.truthy(vim.api.nvim_get_hl(0, { name = "CodeReviewSidebarHeader" }).bold)
     assert.truthy(vim.api.nvim_get_hl(0, { name = "CodeReviewSidebarIncomplete" }))
     assert.truthy(vim.api.nvim_get_hl(0, { name = "CodeReviewSidebarStale" }))
@@ -239,10 +247,11 @@ describe("sidebar", function()
     assert.is_false(vim.wo[sidebar.win].wrap)
     assert.equals("no", vim.wo[sidebar.win].signcolumn)
     assert.equals("0", vim.wo[sidebar.win].foldcolumn)
+    assert.equals(5, vim.api.nvim_win_get_height(sidebar.footer_win))
     code_review.quit()
   end)
 
-  it("renders newest sidebar comments first when truncated", function()
+  it("renders all comments in a native scrollable sidebar buffer", function()
     local code_review = require("code-review")
     local config = require("code-review.config")
     local actions = require("code-review.actions")
@@ -262,9 +271,101 @@ describe("sidebar", function()
       table.insert(review.comments, comment)
     end
     require("code-review.sidebar").render()
-    local lines = table.concat(vim.api.nvim_buf_get_lines(state.get().sidebar.buf, 0, -1, false), "\n")
+    local sidebar = state.get().sidebar
+    local lines = table.concat(vim.api.nvim_buf_get_lines(sidebar.buf, 0, -1, false), "\n")
+    assert.truthy(vim.api.nvim_buf_line_count(sidebar.buf) > vim.api.nvim_win_get_height(sidebar.win))
     assert.falsy(lines:find("  > ", 1, true))
     assert.truthy(lines:find("comment%-30"))
+    assert.truthy(lines:find("comment%-1"))
+    code_review.quit()
+  end)
+
+  it("preserves sidebar scroll view across rerenders", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local model = require("code-review.model")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" }, sidebar = { width = 32 } })
+    vim.cmd.edit(project .. "/x.lua")
+    code_review.start()
+    actions.create_review("Sidebar")
+    local review = model.find_review(state.get().store, state.get().active_review_id)
+    for i = 1, 30 do
+      local comment = model.new_comment(string.format("2026-05-18T00:00:%02dZ", i))
+      comment.body = "comment-" .. i
+      table.insert(review.comments, comment)
+    end
+    require("code-review.sidebar").render()
+    local sidebar = state.get().sidebar
+    local topline = vim.api.nvim_win_call(sidebar.win, function()
+      vim.api.nvim_win_set_cursor(0, { 20, 0 })
+      vim.cmd("normal! zt")
+      return vim.fn.winsaveview().topline
+    end)
+
+    require("code-review.sidebar").render()
+
+    local restored = vim.api.nvim_win_call(sidebar.win, function()
+      return vim.fn.winsaveview().topline
+    end)
+    assert.equals(topline, restored)
+    code_review.quit()
+  end)
+
+  it("filters the sidebar to comments matching the source cursor line", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local model = require("code-review.model")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "one", "two", "three", "four" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" }, sidebar = { width = 32 } })
+    vim.cmd.edit(project .. "/x.lua")
+    local code_win = vim.api.nvim_get_current_win()
+    code_review.start()
+    actions.create_review("Sidebar")
+    local review = model.find_review(state.get().store, state.get().active_review_id)
+    local older = model.new_comment("2026-05-18T00:00:01Z")
+    older.body = "older"
+    table.insert(older.file_references, model.new_file_reference({ relative_path = "x.lua", start_line = 2, end_line = 2, selected_lines_snapshot = { "two" } }))
+    local newer = model.new_comment("2026-05-18T00:00:02Z")
+    newer.body = "newer"
+    table.insert(newer.file_references, model.new_file_reference({ relative_path = "x.lua", start_line = 2, end_line = 3, selected_lines_snapshot = { "two", "three" } }))
+    local other = model.new_comment("2026-05-18T00:00:03Z")
+    other.body = "other"
+    table.insert(other.file_references, model.new_file_reference({ relative_path = "x.lua", start_line = 4, end_line = 4, selected_lines_snapshot = { "four" } }))
+    review.comments = { older, newer, other }
+    vim.api.nvim_set_current_win(code_win)
+    vim.cmd("stopinsert")
+    vim.api.nvim_win_set_cursor(code_win, { 2, 0 })
+
+    require("code-review.sidebar").update_filter_for_buffer(vim.api.nvim_get_current_buf())
+
+    local sidebar = state.get().sidebar
+    local lines = table.concat(vim.api.nvim_buf_get_lines(sidebar.buf, 0, -1, false), "\n")
+    assert.truthy(vim.wo[sidebar.win].winbar:find("Matching comments: 2", 1, true))
+    assert.truthy(lines:find("newer", 1, true))
+    assert.truthy(lines:find("older", 1, true))
+    assert.falsy(lines:find("other", 1, true))
+
+    vim.api.nvim_set_current_win(sidebar.win)
+    require("code-review.sidebar").update_filter_for_buffer(sidebar.buf)
+    lines = table.concat(vim.api.nvim_buf_get_lines(sidebar.buf, 0, -1, false), "\n")
+    assert.falsy(vim.wo[sidebar.win].winbar:find("Matching", 1, true))
+    assert.truthy(lines:find("other", 1, true))
+
+    vim.api.nvim_set_current_win(code_win)
+    vim.api.nvim_win_set_cursor(code_win, { 1, 0 })
+    require("code-review.sidebar").update_filter_for_buffer(vim.api.nvim_get_current_buf())
+    lines = table.concat(vim.api.nvim_buf_get_lines(sidebar.buf, 0, -1, false), "\n")
+    assert.falsy(vim.wo[sidebar.win].winbar:find("Matching", 1, true))
+    assert.truthy(lines:find("other", 1, true))
     code_review.quit()
   end)
 

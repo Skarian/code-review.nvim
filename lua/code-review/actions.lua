@@ -13,7 +13,7 @@ local function current_buffer_allows_action(action)
   end
   local bufnr = vim.api.nvim_get_current_buf()
   local s = state.get()
-  if s.sidebar and s.sidebar.buf == bufnr then
+  if s.sidebar and (s.sidebar.buf == bufnr or s.sidebar.footer_buf == bufnr) then
     notify.warn("Code Review actions run from code buffers.")
     return false
   end

@@ -81,9 +81,16 @@ local function create_augroup()
     group = s.augroup,
     callback = function()
       local current = state.get()
-      if current.active and current.sidebar and current.sidebar.buf == vim.api.nvim_get_current_buf() then
+      local buf = vim.api.nvim_get_current_buf()
+      if current.active and current.sidebar and (current.sidebar.buf == buf or current.sidebar.footer_buf == buf) then
         M.quit()
       end
+    end,
+  })
+  vim.api.nvim_create_autocmd("CursorMoved", {
+    group = s.augroup,
+    callback = function(args)
+      require("code-review.sidebar").update_filter_for_buffer(args.buf)
     end,
   })
   vim.api.nvim_create_autocmd({ "BufEnter", "TextChanged", "TextChangedI", "BufWritePost", "BufDelete", "BufUnload", "DirChanged", "VimResized", "WinResized" }, {
