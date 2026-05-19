@@ -8,6 +8,15 @@ local storage = require("code-review.storage")
 local M = {}
 
 local commands_registered = false
+local sidebar_refresh_ms = 60000
+
+local function stop_sidebar_timer(current)
+  if current.sidebar_timer and not current.sidebar_timer:is_closing() then
+    current.sidebar_timer:stop()
+    current.sidebar_timer:close()
+  end
+  current.sidebar_timer = nil
+end
 
 local function refresh_for_buffer(bufnr)
   if not state.is_active() then
@@ -35,6 +44,19 @@ local function debounce_stale_refresh(bufnr)
   current.stale_timer:start(config.get().stale.debounce_ms or 200, 0, function()
     vim.schedule(function()
       refresh_for_buffer(bufnr)
+    end)
+  end)
+end
+
+local function start_sidebar_timer()
+  local current = state.get()
+  stop_sidebar_timer(current)
+  current.sidebar_timer = (vim.uv or vim.loop).new_timer()
+  current.sidebar_timer:start(sidebar_refresh_ms, sidebar_refresh_ms, function()
+    vim.schedule(function()
+      if state.is_active() then
+        require("code-review.sidebar").render()
+      end
     end)
   end)
 end
@@ -122,6 +144,7 @@ function M.start()
   state.activate(project_root, handle.root_hash, handle.store, handle)
   require("code-review.sidebar").render()
   create_augroup()
+  start_sidebar_timer()
   require("code-review.highlights").refresh()
   if handle.store.last_active_review_id then
     state.set_mode("comment_list")
@@ -151,6 +174,7 @@ function M.quit()
     s.stale_timer:stop()
     s.stale_timer:close()
   end
+  stop_sidebar_timer(s)
   state.deactivate()
 end
 

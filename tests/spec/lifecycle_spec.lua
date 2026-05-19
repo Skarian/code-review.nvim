@@ -151,6 +151,28 @@ describe("lifecycle and keymaps", function()
     assert.is_false(code_review.is_active())
   end)
 
+  it("starts and stops the sidebar refresh timer with Review Mode", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" } })
+    vim.cmd.edit(project .. "/x.lua")
+
+    code_review.start()
+
+    local timer = state.get().sidebar_timer
+    assert.truthy(timer)
+    assert.is_false(timer:is_closing())
+
+    code_review.quit()
+
+    assert.falsy(state.get().sidebar_timer)
+    assert.is_true(timer:is_closing())
+  end)
+
   it("restores the previous active-review mode when cancelling review picker", function()
     local code_review = require("code-review")
     local config = require("code-review.config")

@@ -13,6 +13,7 @@ local state = {
   composer = nil,
   mappings = {},
   augroup = nil,
+  sidebar_timer = nil,
   storage = nil,
   voice = nil,
 }
@@ -59,6 +60,7 @@ function M.deactivate()
   state.storage = nil
   state.voice = nil
   state.composer = nil
+  state.sidebar_timer = nil
 end
 
 function M.reset()
