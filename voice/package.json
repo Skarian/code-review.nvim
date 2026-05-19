@@ -1,0 +1,22 @@
+{
+  "name": "code-review-nvim-voice",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node scripts/build.mjs && node --test tests/*.test.mjs",
+    "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
+    "lint": "node scripts/lint.mjs",
+    "build": "node scripts/build.mjs"
+  },
+  "dependencies": {
+    "decibri": "^3.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.4",
+    "typescript": "^5.9.3"
+  }
+}

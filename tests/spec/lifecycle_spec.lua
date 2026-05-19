@@ -1,0 +1,143 @@
+describe("lifecycle and keymaps", function()
+  it("installs child mappings without mapping the parent prefix", function()
+    local code_review = require("code-review")
+    code_review.setup({ keymaps = { prefix = "<leader>r" } })
+    assert.equals("", vim.fn.maparg("<leader>r", "n"))
+    assert.truthy(vim.fn.maparg("<leader>rr", "n"))
+    assert.truthy(vim.fn.maparg("<leader>ra", "x"))
+  end)
+
+  it("starts, creates a review, adds a reference, and previews", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local state = require("code-review.state")
+
+    local original_cwd = vim.fn.getcwd()
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.mkdir(project .. "/lua", "p")
+    vim.fn.writefile({ "local a = 1", "local b = 2", "return a + b" }, project .. "/lua/example.lua")
+    vim.cmd("lcd " .. vim.fn.fnameescape(project))
+    config.setup({ storage = { dir = project .. "/store" } })
+
+    vim.cmd.edit(project .. "/lua/example.lua")
+    code_review.start()
+    assert.is_true(code_review.is_active())
+    actions.create_review("Smoke")
+    assert.truthy(state.get().active_review_id)
+
+    vim.fn.setpos("'<", { 0, 1, 1, 0 })
+    vim.fn.setpos("'>", { 0, 2, 1, 0 })
+    actions.add_reference()
+    local review = require("code-review.model").find_review(state.get().store, state.get().active_review_id)
+    local comment = review.comments[1]
+    assert.equals(1, #comment.file_references)
+    comment.body = "Please check this."
+    require("code-review.model").touch_comment(review, comment)
+    actions.preview()
+    assert.equals("preview", state.mode())
+    local text = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n")
+    assert.truthy(text:find("Review: Smoke", 1, true))
+    assert.truthy(text:find("lua/example.lua:1-2", 1, true))
+
+    code_review.quit()
+    vim.cmd("lcd " .. vim.fn.fnameescape(original_cwd))
+  end)
+
+  it("blocks review switching while a comment is open", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" } })
+    vim.cmd.edit(project .. "/x.lua")
+    code_review.start()
+    actions.create_review("One")
+    actions.new_comment()
+    actions.create_review("Two")
+    assert.equals("comment_open", state.mode())
+    code_review.quit()
+  end)
+
+  it("deletes the active review and selects the next newest review", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" } })
+    vim.cmd.edit(project .. "/x.lua")
+    code_review.start()
+    actions.create_review("One")
+    local one = state.get().active_review_id
+    actions.create_review("Two")
+    local old_select = vim.ui.select
+    vim.ui.select = function(_, _, cb)
+      cb("Delete")
+    end
+    actions.delete_review()
+    vim.ui.select = old_select
+    assert.equals(1, #state.get().store.reviews)
+    assert.equals(one, state.get().active_review_id)
+    code_review.quit()
+  end)
+
+  it("exits Review Mode when cancelling initial review name input", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" } })
+    vim.cmd.edit(project .. "/x.lua")
+    local old_input = vim.ui.input
+    vim.ui.input = function(_, cb)
+      cb(nil)
+    end
+    code_review.start()
+    require("code-review.review_picker").open()
+    vim.ui.input = old_input
+    assert.is_false(code_review.is_active())
+  end)
+
+  it("restores the previous active-review mode when cancelling review picker", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" } })
+    vim.cmd.edit(project .. "/x.lua")
+    code_review.start()
+    actions.create_review("One")
+    local review = require("code-review.model").find_review(state.get().store, state.get().active_review_id)
+    local model = require("code-review.model")
+    local comment = model.new_comment()
+    comment.body = "ready"
+    table.insert(comment.file_references, model.new_file_reference({
+      relative_path = "x.lua",
+      start_line = 1,
+      end_line = 1,
+      selected_lines_snapshot = { "x" },
+    }))
+    table.insert(review.comments, comment)
+    actions.preview()
+    assert.equals("preview", state.mode())
+    local old_select = vim.ui.select
+    vim.ui.select = function(_, _, cb)
+      cb(nil)
+    end
+    require("code-review.review_picker").open()
+    vim.ui.select = old_select
+    assert.equals("preview", state.mode())
+    code_review.quit()
+  end)
+end)

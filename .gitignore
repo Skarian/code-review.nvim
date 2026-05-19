@@ -1,0 +1,10 @@
+.DS_Store
+.nvimlog
+.agent
+.agents
+AGENTS.md
+skills-lock.json
+
+voice/node_modules/
+voice/*.log
+npm-debug.log*
