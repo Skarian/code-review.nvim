@@ -50,6 +50,20 @@ function M.setup_defaults()
       defaults[#defaults + 1] = { mode = spec.mode, lhs = lhs }
     end
   end
+  if cfg.add_reference ~= false and cfg.add_reference ~= nil then
+    local lhs = cfg.prefix .. cfg.add_reference
+    vim.keymap.set("n", lhs, function()
+      require("code-review.actions").new_comment()
+    end, { desc = "Code Review: New comment from selection" })
+    defaults[#defaults + 1] = { mode = "n", lhs = lhs }
+  end
+  if cfg.append_reference ~= false and cfg.append_reference ~= nil then
+    local lhs = cfg.prefix .. cfg.append_reference
+    vim.keymap.set("n", lhs, function()
+      require("code-review.actions").append_reference_hint()
+    end, { desc = "Code Review: Append selection to comment" })
+    defaults[#defaults + 1] = { mode = "n", lhs = lhs }
+  end
   local ok, which_key = pcall(require, "which-key")
   if ok and which_key.add then
     pcall(which_key.add, { { config.get().keymaps.prefix, group = "Code Review" } })

@@ -210,7 +210,11 @@ function M.append_reference()
 end
 
 function M.new_comment()
-  notify.warn("Select lines with <leader>ra to create a Comment.")
+  notify.warn("Select at least one line in Visual mode to create a Comment.")
+end
+
+function M.append_reference_hint()
+  notify.warn("Select at least one line in Visual mode to append a File Reference.")
 end
 
 function M.edit_comment()
