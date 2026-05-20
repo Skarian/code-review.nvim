@@ -328,18 +328,16 @@ end
 local function build_header(review, filter, width)
   local prefix = "Code Review"
   if not review then
-    return truncate_to_width(prefix .. " | No active review", width)
-  end
-  if filter and filter.count == 1 then
-    local label = "Matching comment"
-    local full = prefix .. " | " .. label
-    return vim.fn.strdisplaywidth(full) <= width and full or truncate_to_width(label, width)
-  elseif filter and filter.count and filter.count > 1 then
-    local label = "Matching comments: " .. filter.count
-    local full = prefix .. " | " .. label
-    return vim.fn.strdisplaywidth(full) <= width and full or truncate_to_width(label, width)
+    return prefix
   end
   return truncate_to_width(prefix .. " | " .. review.name, width)
+end
+
+local function scope_line(comment_count, filter)
+  if filter and filter.ids then
+    return string.format("%d Comments on this line only", comment_count)
+  end
+  return string.format("%d Total Comments", comment_count)
 end
 
 local function vertically_centered_message(text, width, height)
@@ -361,6 +359,9 @@ local function build_lines(review, filter, width, height)
   if review then
     local comments = filter_comments(model.comments_newest(review), filter)
     if #comments > 0 then
+      lines[#lines + 1] = ""
+      lines[#lines + 1] = center_line(scope_line(#comments, filter), content_width)
+      highlights[#highlights + 1] = { line = #lines - 1, group = "CodeReviewSidebarScope" }
       lines[#lines + 1] = ""
     end
     for _, comment in ipairs(comments) do

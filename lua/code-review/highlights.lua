@@ -13,6 +13,7 @@ function M.setup()
   vim.api.nvim_set_hl(0, "CodeReviewStatus", { fg = "#ffd75f", bold = true, default = true })
   vim.api.nvim_set_hl(0, "CodeReviewSidebarTitle", { fg = "#8ec07c", bg = "#1f3324", bold = true, default = true })
   vim.api.nvim_set_hl(0, "CodeReviewSidebarHeader", { fg = "#8ec07c", bold = true, default = true })
+  vim.api.nvim_set_hl(0, "CodeReviewSidebarScope", { fg = "#a89984", italic = true, default = true })
   vim.api.nvim_set_hl(0, "CodeReviewSidebarIncomplete", { fg = "#fabd2f", default = true })
   vim.api.nvim_set_hl(0, "CodeReviewSidebarStale", { fg = "#fb4934", default = true })
 end

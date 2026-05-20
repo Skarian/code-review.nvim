@@ -212,7 +212,8 @@ describe("sidebar", function()
     local lines = vim.api.nvim_buf_get_lines(sidebar.buf, 0, -1, false)
     assert.truthy(vim.wo[sidebar.win].winbar:find("%%=", 1, false))
     assert.truthy(vim.wo[sidebar.win].winbar:find("CodeReviewSidebarTitle", 1, true))
-    assert.truthy(vim.wo[sidebar.win].winbar:find("Code Review | No active review", 1, true))
+    assert.truthy(vim.wo[sidebar.win].winbar:find("Code Review", 1, true))
+    assert.falsy(vim.wo[sidebar.win].winbar:find("No active review", 1, true))
 
     local empty_line
     for index, line in ipairs(lines) do
@@ -232,6 +233,8 @@ describe("sidebar", function()
 
     state.get().sidebar.filter = { ids = { "missing" }, count = 1 }
     require("code-review.sidebar").render()
+    assert.truthy(vim.wo[sidebar.win].winbar:find("Code Review | Test", 1, true))
+    assert.falsy(vim.wo[sidebar.win].winbar:find("Matching", 1, true))
     lines = vim.api.nvim_buf_get_lines(sidebar.buf, 0, -1, false)
     empty_line = nil
     for index, line in ipairs(lines) do
@@ -275,6 +278,7 @@ describe("sidebar", function()
     assert.is_true(has_normal_map(sidebar.footer_buf, "q"))
     assert.truthy(vim.api.nvim_get_hl(0, { name = "CodeReviewSidebarTitle" }).bg)
     assert.truthy(vim.api.nvim_get_hl(0, { name = "CodeReviewSidebarHeader" }).bold)
+    assert.truthy(vim.api.nvim_get_hl(0, { name = "CodeReviewSidebarScope" }).italic)
     assert.truthy(vim.api.nvim_get_hl(0, { name = "CodeReviewSidebarIncomplete" }))
     assert.truthy(vim.api.nvim_get_hl(0, { name = "CodeReviewSidebarStale" }))
     assert.is_false(vim.wo[sidebar.win].number)
@@ -342,6 +346,7 @@ describe("sidebar", function()
     local lines = table.concat(vim.api.nvim_buf_get_lines(sidebar.buf, 0, -1, false), "\n")
     assert.truthy(vim.api.nvim_buf_line_count(sidebar.buf) > vim.api.nvim_win_get_height(sidebar.win))
     assert.falsy(lines:find("  > ", 1, true))
+    assert.truthy(lines:find("30 Total Comments", 1, true))
     assert.truthy(lines:find("comment%-30"))
     assert.truthy(lines:find("comment%-1"))
     code_review.quit()
@@ -374,7 +379,14 @@ describe("sidebar", function()
 
     local sidebar = state.get().sidebar
     local lines = vim.api.nvim_buf_get_lines(sidebar.buf, 0, -1, false)
+    local width = vim.api.nvim_win_get_width(sidebar.win)
     assert.equals("", lines[1])
+    assert.truthy(lines[2]:find("1 Total Comments", 1, true))
+    assert.is_true(is_centered(lines[2], "1 Total Comments", width))
+    assert.equals("", lines[3])
+    local ns = vim.api.nvim_get_namespaces()["code-review.nvim.sidebar"]
+    local scope_marks = vim.api.nvim_buf_get_extmarks(sidebar.buf, ns, { 1, 0 }, { 2, 0 }, { details = true })
+    assert.equals("CodeReviewSidebarScope", scope_marks[1][4].hl_group)
     local timestamp, reference, body
     for _, line in ipairs(lines) do
       if line:find("ago", 1, true) then
@@ -462,7 +474,9 @@ describe("sidebar", function()
 
     local sidebar = state.get().sidebar
     local lines = table.concat(vim.api.nvim_buf_get_lines(sidebar.buf, 0, -1, false), "\n")
-    assert.truthy(vim.wo[sidebar.win].winbar:find("Matching comments: 2", 1, true))
+    assert.truthy(vim.wo[sidebar.win].winbar:find("Code Review | Sidebar", 1, true))
+    assert.falsy(vim.wo[sidebar.win].winbar:find("Matching", 1, true))
+    assert.truthy(lines:find("2 Comments on this line only", 1, true))
     assert.truthy(lines:find("newer", 1, true))
     assert.truthy(lines:find("older", 1, true))
     assert.falsy(lines:find("other", 1, true))
@@ -471,6 +485,7 @@ describe("sidebar", function()
     require("code-review.sidebar").update_filter_for_buffer(sidebar.buf)
     lines = table.concat(vim.api.nvim_buf_get_lines(sidebar.buf, 0, -1, false), "\n")
     assert.falsy(vim.wo[sidebar.win].winbar:find("Matching", 1, true))
+    assert.truthy(lines:find("3 Total Comments", 1, true))
     assert.truthy(lines:find("other", 1, true))
 
     vim.api.nvim_set_current_win(code_win)
@@ -478,6 +493,7 @@ describe("sidebar", function()
     require("code-review.sidebar").update_filter_for_buffer(vim.api.nvim_get_current_buf())
     lines = table.concat(vim.api.nvim_buf_get_lines(sidebar.buf, 0, -1, false), "\n")
     assert.falsy(vim.wo[sidebar.win].winbar:find("Matching", 1, true))
+    assert.truthy(lines:find("3 Total Comments", 1, true))
     assert.truthy(lines:find("other", 1, true))
     code_review.quit()
   end)
