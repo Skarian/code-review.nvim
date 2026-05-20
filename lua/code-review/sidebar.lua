@@ -291,15 +291,14 @@ end
 local function preview_body(body, width)
   local lines = vim.split(body or "", "\n", { plain = true })
   local out = {}
-  local body_pad = "  "
-  local available = width - vim.fn.strdisplaywidth(pad) - vim.fn.strdisplaywidth(body_pad)
+  local available = width - vim.fn.strdisplaywidth(pad)
   if available <= 0 then
     return out
   end
   for _, line in ipairs(lines) do
     if line ~= "" then
       for _, wrapped in ipairs(wrap_preview_line(line, available)) do
-        out[#out + 1] = body_pad .. wrapped
+        out[#out + 1] = wrapped
         if #out == 4 then
           return out
         end
@@ -329,27 +328,41 @@ end
 local function build_header(review, filter, width)
   local prefix = "Code Review"
   if not review then
-    return truncate_to_width(" " .. prefix .. " | No active review ", width)
+    return truncate_to_width(prefix .. " | No active review", width)
   end
   if filter and filter.count == 1 then
     local label = "Matching comment"
-    local full = " " .. prefix .. " | " .. label .. " "
-    return vim.fn.strdisplaywidth(full) <= width and full or truncate_to_width(" " .. label .. " ", width)
+    local full = prefix .. " | " .. label
+    return vim.fn.strdisplaywidth(full) <= width and full or truncate_to_width(label, width)
   elseif filter and filter.count and filter.count > 1 then
     local label = "Matching comments: " .. filter.count
-    local full = " " .. prefix .. " | " .. label .. " "
-    return vim.fn.strdisplaywidth(full) <= width and full or truncate_to_width(" " .. label .. " ", width)
+    local full = prefix .. " | " .. label
+    return vim.fn.strdisplaywidth(full) <= width and full or truncate_to_width(label, width)
   end
-  return truncate_to_width(" " .. prefix .. " | Review: " .. review.name .. " ", width)
+  return truncate_to_width(prefix .. " | " .. review.name, width)
 end
 
-local function build_lines(review, filter, width)
+local function vertically_centered_message(text, width, height)
+  local lines = {}
+  local top_padding = math.max(0, math.floor((height - 1) / 2))
+  for _ = 1, top_padding do
+    lines[#lines + 1] = ""
+  end
+  lines[#lines + 1] = center_line(text, width)
+  return lines
+end
+
+local function build_lines(review, filter, width, height)
   local content_width = math.max(1, width)
+  local content_height = math.max(1, height or 1)
   local lines = {}
   local highlights = {}
   local metadata = { comment_lines = {} }
   if review then
     local comments = filter_comments(model.comments_newest(review), filter)
+    if #comments > 0 then
+      lines[#lines + 1] = ""
+    end
     for _, comment in ipairs(comments) do
       local flags = {}
       local incomplete = not model.comment_complete(comment)
@@ -372,7 +385,7 @@ local function build_lines(review, filter, width)
         highlights[#highlights + 1] = { line = #lines - 1, group = "CodeReviewSidebarStale" }
       end
       for _, ref in ipairs(comment.file_references or {}) do
-        lines[#lines + 1] = padded(string.format("  %s:%d-%d%s", ref.relative_path, ref.start_line, ref.end_line, ref.stale_state == "stale" and " !" or ""), content_width)
+        lines[#lines + 1] = padded(string.format("%s:%d-%d%s", ref.relative_path, ref.start_line, ref.end_line, ref.stale_state == "stale" and " !" or ""), content_width)
         if ref.stale_state == "stale" then
           highlights[#highlights + 1] = { line = #lines - 1, group = "CodeReviewSidebarStale" }
         end
@@ -383,11 +396,11 @@ local function build_lines(review, filter, width)
       lines[#lines + 1] = ""
     end
     if #comments == 0 then
-      lines[#lines + 1] = center_line("No matching comments", content_width)
+      lines = vertically_centered_message("No Comments", content_width, content_height)
       highlights[#highlights + 1] = { line = #lines - 1, group = "CodeReviewSidebarHeader" }
     end
   else
-    lines[#lines + 1] = center_line("No active review", content_width)
+    lines = vertically_centered_message("No active review", content_width, content_height)
     highlights[#highlights + 1] = { line = #lines - 1, group = "CodeReviewSidebarHeader" }
   end
   if #lines == 0 then
@@ -493,11 +506,12 @@ function M.render()
   end
   local buf, win, footer_buf = ensure()
   local width = valid_win(win) and vim.api.nvim_win_get_width(win) or config.get().sidebar.width
+  local height = valid_win(win) and vim.api.nvim_win_get_height(win) or 1
   local review = model.find_review(s.store, s.active_review_id)
   local filter = s.sidebar and s.sidebar.filter or nil
   local view = valid_win(win) and vim.api.nvim_win_call(win, vim.fn.winsaveview) or nil
-  local lines, highlights, metadata = build_lines(review, filter, width)
-  vim.wo[win].winbar = "%#CodeReviewSidebarHeader#" .. statusline_escape(build_header(review, filter, width))
+  local lines, highlights, metadata = build_lines(review, filter, width, height)
+  vim.wo[win].winbar = "%#CodeReviewSidebarTitle#%=" .. statusline_escape(build_header(review, filter, width)) .. "%="
   set_readonly_lines(buf, lines)
   apply_highlights(buf, highlights)
   set_readonly_lines(footer_buf, footer_lines(width))

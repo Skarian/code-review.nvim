@@ -194,9 +194,10 @@ describe("sidebar", function()
     assert.equals(code_win, vim.api.nvim_get_current_win())
   end)
 
-  it("shows fixed header chrome and centers the empty review message", function()
+  it("shows centered header chrome and vertically centers empty messages", function()
     local code_review = require("code-review")
     local config = require("code-review.config")
+    local actions = require("code-review.actions")
     local state = require("code-review.state")
     local project = vim.fn.tempname()
     vim.fn.mkdir(project .. "/.git", "p")
@@ -207,8 +208,11 @@ describe("sidebar", function()
 
     local sidebar = state.get().sidebar
     local width = vim.api.nvim_win_get_width(sidebar.win)
+    local height = vim.api.nvim_win_get_height(sidebar.win)
     local lines = vim.api.nvim_buf_get_lines(sidebar.buf, 0, -1, false)
-    assert.truthy(vim.wo[sidebar.win].winbar:find("Code Review", 1, true))
+    assert.truthy(vim.wo[sidebar.win].winbar:find("%%=", 1, false))
+    assert.truthy(vim.wo[sidebar.win].winbar:find("CodeReviewSidebarTitle", 1, true))
+    assert.truthy(vim.wo[sidebar.win].winbar:find("Code Review | No active review", 1, true))
 
     local empty_line
     for index, line in ipairs(lines) do
@@ -219,6 +223,25 @@ describe("sidebar", function()
       end
     end
     assert.truthy(empty_line)
+    assert.equals(math.floor((height - 1) / 2) + 1, empty_line)
+
+    actions.create_review("Test")
+    require("code-review.sidebar").render()
+    assert.truthy(vim.wo[sidebar.win].winbar:find("Code Review | Test", 1, true))
+    assert.falsy(vim.wo[sidebar.win].winbar:find("Review: Test", 1, true))
+
+    state.get().sidebar.filter = { ids = { "missing" }, count = 1 }
+    require("code-review.sidebar").render()
+    lines = vim.api.nvim_buf_get_lines(sidebar.buf, 0, -1, false)
+    empty_line = nil
+    for index, line in ipairs(lines) do
+      if line:find("No Comments", 1, true) then
+        empty_line = index
+        assert.is_true(is_centered(line, "No Comments", width - 1))
+        break
+      end
+    end
+    assert.equals(math.floor((height - 1) / 2) + 1, empty_line)
 
     code_review.quit()
   end)
@@ -250,6 +273,7 @@ describe("sidebar", function()
     assert.is_true(has_normal_map(sidebar.footer_buf, "?"))
     assert.is_true(has_normal_map(sidebar.buf, "q"))
     assert.is_true(has_normal_map(sidebar.footer_buf, "q"))
+    assert.truthy(vim.api.nvim_get_hl(0, { name = "CodeReviewSidebarTitle" }).bg)
     assert.truthy(vim.api.nvim_get_hl(0, { name = "CodeReviewSidebarHeader" }).bold)
     assert.truthy(vim.api.nvim_get_hl(0, { name = "CodeReviewSidebarIncomplete" }))
     assert.truthy(vim.api.nvim_get_hl(0, { name = "CodeReviewSidebarStale" }))
@@ -320,6 +344,52 @@ describe("sidebar", function()
     assert.falsy(lines:find("  > ", 1, true))
     assert.truthy(lines:find("comment%-30"))
     assert.truthy(lines:find("comment%-1"))
+    code_review.quit()
+  end)
+
+  it("aligns timestamps, references, and comment preview text", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local model = require("code-review.model")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" }, sidebar = { width = 32 } })
+    vim.cmd.edit(project .. "/x.lua")
+    code_review.start()
+    actions.create_review("Sidebar")
+    local review = model.find_review(state.get().store, state.get().active_review_id)
+    local comment = model.new_comment("2026-05-18T00:00:01Z")
+    comment.body = "comment body"
+    table.insert(comment.file_references, model.new_file_reference({
+      relative_path = "x.lua",
+      start_line = 1,
+      end_line = 1,
+      selected_lines_snapshot = { "x" },
+    }))
+    table.insert(review.comments, comment)
+    require("code-review.sidebar").render()
+
+    local sidebar = state.get().sidebar
+    local lines = vim.api.nvim_buf_get_lines(sidebar.buf, 0, -1, false)
+    assert.equals("", lines[1])
+    local timestamp, reference, body
+    for _, line in ipairs(lines) do
+      if line:find("ago", 1, true) then
+        timestamp = line
+      elseif line:find("x.lua:1%-1") then
+        reference = line
+      elseif line:find("comment body", 1, true) then
+        body = line
+      end
+    end
+    assert.truthy(timestamp)
+    assert.truthy(reference)
+    assert.truthy(body)
+    assert.equals(timestamp:find("%S"), reference:find("%S"))
+    assert.equals(timestamp:find("%S"), body:find("%S"))
     code_review.quit()
   end)
 
