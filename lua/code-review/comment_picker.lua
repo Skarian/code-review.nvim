@@ -1,4 +1,5 @@
 local model = require("code-review.model")
+local navigation = require("code-review.navigation")
 local notify = require("code-review.notify")
 local preview = require("code-review.preview")
 local state = require("code-review.state")
@@ -89,14 +90,12 @@ local function delete_comment(comment, after_delete)
 end
 
 local function jump_to_comment(comment)
-  local s = state.get()
   local ref = comment.file_references and comment.file_references[1]
   if not ref then
     notify.warn("Comment has no File References.")
     return
   end
-  vim.cmd.edit(vim.fs.joinpath(s.root, ref.relative_path))
-  vim.api.nvim_win_set_cursor(0, { ref.start_line, 0 })
+  navigation.go_to(ref.relative_path, ref.start_line)
   require("code-review.sidebar").render()
   require("code-review.highlights").refresh()
 end

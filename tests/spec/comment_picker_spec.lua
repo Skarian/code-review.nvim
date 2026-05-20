@@ -124,6 +124,54 @@ describe("comment picker", function()
     code_review.quit()
   end)
 
+  it("opens the comment picker from plugin buffers", function()
+    local code_review, actions, model, _state, review = start_project()
+    add_comment(model, review, "body", 1, "2026-05-18T00:00:01Z")
+    vim.cmd.enew()
+    vim.bo.buftype = "nofile"
+    vim.bo.bufhidden = "wipe"
+    vim.api.nvim_buf_set_name(0, "Plugin Buffer " .. vim.fn.tempname())
+    local picker = require("code-review.comment_picker")
+    local old_pick = picker.adapter.pick_comments
+    local picked = false
+    picker.adapter.pick_comments = function(items, callbacks)
+      picked = true
+      assert.equals(1, #items)
+      callbacks.cancel()
+    end
+
+    actions.dispatch("edit_comment")
+
+    picker.adapter.pick_comments = old_pick
+    assert.is_true(picked)
+    code_review.quit()
+  end)
+
+  it("routes picker jump from plugin buffers through an existing source window", function()
+    local code_review, actions, model, _state, review = start_project()
+    add_comment(model, review, "body", 3, "2026-05-18T00:00:01Z")
+    local source_win = vim.api.nvim_get_current_win()
+    vim.cmd.vsplit()
+    local plugin_win = vim.api.nvim_get_current_win()
+    vim.cmd.enew()
+    vim.bo.buftype = "nofile"
+    vim.bo.bufhidden = "wipe"
+    vim.api.nvim_buf_set_name(0, "Plugin Buffer " .. vim.fn.tempname())
+    vim.api.nvim_set_current_win(plugin_win)
+    local picker = require("code-review.comment_picker")
+    local old_pick = picker.adapter.pick_comments
+    picker.adapter.pick_comments = function(items, callbacks)
+      callbacks.jump(items[1])
+    end
+
+    actions.edit_comment()
+
+    picker.adapter.pick_comments = old_pick
+    assert.equals(source_win, vim.api.nvim_get_current_win())
+    assert.equals(3, vim.api.nvim_win_get_cursor(source_win)[1])
+    code_review.quit()
+  end)
+
   it("opens the comment editor directly from a single highlighted line", function()
     local code_review, actions, model, state, review = start_project()
     local comment = add_comment(model, review, "body", 2, "2026-05-18T00:00:01Z")
@@ -180,6 +228,31 @@ describe("comment picker", function()
       vim.api.nvim_win_set_cursor(0, { 4, 0 })
       actions.edit_comment_under_cursor()
       assert.equals("No Comment on the current line.", messages[1])
+    end)
+
+    picker.adapter.pick_comments = old_pick
+    assert.is_false(picked)
+    assert.falsy(state.get().composer)
+    code_review.quit()
+  end)
+
+  it("keeps under-cursor comment editing restricted to source buffers", function()
+    local code_review, actions, model, state, review = start_project()
+    add_comment(model, review, "body", 2, "2026-05-18T00:00:01Z")
+    vim.cmd.enew()
+    vim.bo.buftype = "nofile"
+    vim.bo.bufhidden = "wipe"
+    vim.api.nvim_buf_set_name(0, "Plugin Buffer " .. vim.fn.tempname())
+    local picker = require("code-review.comment_picker")
+    local old_pick = picker.adapter.pick_comments
+    local picked = false
+    picker.adapter.pick_comments = function()
+      picked = true
+    end
+
+    with_notify(function(messages)
+      actions.edit_comment_under_cursor()
+      assert.equals("Open a file buffer inside the active Review root first.", messages[1])
     end)
 
     picker.adapter.pick_comments = old_pick

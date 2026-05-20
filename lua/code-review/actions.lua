@@ -1,4 +1,5 @@
 local model = require("code-review.model")
+local navigation = require("code-review.navigation")
 local notify = require("code-review.notify")
 local path = require("code-review.path")
 local preview = require("code-review.preview")
@@ -6,32 +7,6 @@ local state = require("code-review.state")
 local storage = require("code-review.storage")
 
 local M = {}
-
-local function current_buffer_allows_action(action)
-  if action == "quit" then
-    return true
-  end
-  local bufnr = vim.api.nvim_get_current_buf()
-  local s = state.get()
-  if s.sidebar and (s.sidebar.buf == bufnr or s.sidebar.footer_buf == bufnr) then
-    notify.warn("Code Review actions run from code buffers.")
-    return false
-  end
-  if s.preview and s.preview.buf == bufnr then
-    notify.warn("Code Review actions run from code buffers.")
-    return false
-  end
-  if s.composer and (s.composer.buf == bufnr or s.composer.body_buf == bufnr or s.composer.refs_buf == bufnr or s.composer.status_buf == bufnr) then
-    notify.warn("Submit or cancel the comment composer first.")
-    return false
-  end
-  local bt = vim.bo[bufnr].buftype
-  if bt ~= "" then
-    notify.warn("Code Review actions run from normal file buffers.")
-    return false
-  end
-  return true
-end
 
 local function active_review()
   local s = state.get()
@@ -218,9 +193,13 @@ function M.append_reference_hint()
 end
 
 function M.edit_comment()
-  if require_active() then
-    require("code-review.comment_picker").open()
+  if not require_active() then
+    return
   end
+  if blocked_by_editor_or_voice() then
+    return
+  end
+  require("code-review.comment_picker").open()
 end
 
 local function comments_under_cursor()
@@ -228,6 +207,9 @@ local function comments_under_cursor()
   local review = active_review()
   if not review then
     return nil, "Create or select a Review first."
+  end
+  if not navigation.require_source_buffer("Open a file buffer inside the active Review root first.") then
+    return nil
   end
   local bufnr = vim.api.nvim_get_current_buf()
   local rel = path.relative(s.root, vim.api.nvim_buf_get_name(bufnr))
@@ -272,10 +254,7 @@ function M.open_picker()
   if not state.is_active() then
     require("code-review").start()
   end
-  if not current_buffer_allows_action("open_picker") then
-    return
-  end
-  if state.mode() ~= "comment_list" and state.mode() ~= "review_picker" then
+  if state.mode() ~= "comment_list" and state.mode() ~= "review_picker" and state.mode() ~= "preview" then
     notify.warn("Close current Review UI before switching Reviews.")
     return
   end
@@ -301,13 +280,8 @@ function M.preview()
     return
   end
   local s = state.get()
-  local bufnr = vim.api.nvim_get_current_buf()
-  if vim.bo[bufnr].buftype ~= "" or vim.api.nvim_buf_get_name(bufnr) == "" or not path.relative(s.root, vim.api.nvim_buf_get_name(bufnr)) then
-    notify.warn("Preview from a saved code buffer inside the active Review root.")
-    return
-  end
-  if vim.bo[bufnr].modified then
-    notify.warn("Write the buffer before previewing the active Review.")
+  if #navigation.modified_visible_source_buffers() > 0 then
+    notify.warn("Write modified Review files before previewing")
     return
   end
   local review = active_review()
@@ -354,9 +328,6 @@ function M.quit()
 end
 
 function M.dispatch(action)
-  if not current_buffer_allows_action(action) then
-    return
-  end
   if M[action] then
     return M[action]()
   end

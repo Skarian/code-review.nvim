@@ -1,5 +1,6 @@
 local config = require("code-review.config")
 local model = require("code-review.model")
+local navigation = require("code-review.navigation")
 local notify = require("code-review.notify")
 local plugin = require("code-review.plugin")
 local state = require("code-review.state")
@@ -223,15 +224,7 @@ local function go_to_reference(index)
     notify.warn("Move to a draft File Reference row first.")
     return
   end
-  local source_win = valid_win(composer.source_win) and composer.source_win or nil
-  if not source_win then
-    notify.warn("Source window is no longer available.")
-    return
-  end
-  vim.api.nvim_win_call(source_win, function()
-    vim.cmd.edit(vim.fs.joinpath(root, ref.relative_path))
-    vim.api.nvim_win_set_cursor(0, { ref.start_line, 0 })
-  end)
+  navigation.go_to(ref.relative_path, ref.start_line)
 end
 
 local function reference_action()

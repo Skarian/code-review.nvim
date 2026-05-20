@@ -31,6 +31,38 @@ describe("lifecycle and keymaps", function()
     vim.cmd.bwipeout()
   end)
 
+  it("keeps visual reference actions restricted to source buffers", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" } })
+    vim.cmd.edit(project .. "/x.lua")
+    code_review.start()
+    actions.create_review("Visual")
+    vim.cmd.enew()
+    vim.bo.buftype = "nofile"
+    vim.bo.bufhidden = "wipe"
+    vim.api.nvim_buf_set_name(0, "Plugin Buffer " .. vim.fn.tempname())
+    vim.fn.setpos("'<", { 0, 1, 1, 0 })
+    vim.fn.setpos("'>", { 0, 1, 1, 0 })
+    local old_notify = vim.notify
+    local messages = {}
+    vim.notify = function(message)
+      messages[#messages + 1] = message
+    end
+
+    actions.add_reference()
+
+    vim.notify = old_notify
+    assert.equals("Save the buffer before adding a File Reference.", messages[1])
+    assert.falsy(state.get().composer)
+    code_review.quit()
+  end)
+
   it("starts, creates a review, adds a reference, and previews", function()
     local code_review = require("code-review")
     local config = require("code-review.config")
