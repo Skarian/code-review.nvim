@@ -16,6 +16,11 @@ local state = {
   sidebar_timer = nil,
   storage = nil,
   voice = nil,
+  work_windows = {},
+  last_work_window_options = nil,
+  tearing_down = false,
+  recreating_sidebar = false,
+  auxiliary_exit_requested = false,
 }
 
 function M.get()
@@ -47,6 +52,11 @@ function M.activate(root, root_hash, store, storage)
   state.store = store
   state.storage = storage
   state.active_review_id = store.last_active_review_id
+  state.work_windows = {}
+  state.last_work_window_options = nil
+  state.tearing_down = false
+  state.recreating_sidebar = false
+  state.auxiliary_exit_requested = false
 end
 
 function M.deactivate()
@@ -60,7 +70,14 @@ function M.deactivate()
   state.storage = nil
   state.voice = nil
   state.composer = nil
+  state.preview = nil
+  state.sidebar = nil
   state.sidebar_timer = nil
+  state.work_windows = {}
+  state.last_work_window_options = nil
+  state.tearing_down = false
+  state.recreating_sidebar = false
+  state.auxiliary_exit_requested = false
 end
 
 function M.reset()

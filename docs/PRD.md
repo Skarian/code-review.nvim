@@ -513,7 +513,7 @@ Highlight groups:
 
 ## Sidebar
 
-The sidebar is always visible while Review Mode is active.
+The sidebar is visible while Review Mode is active. Review Mode starts only when a visible named file buffer is available, but after start it can remain anchored by any normal work window, including unnamed or outside-root buffers.
 
 Content:
 
@@ -528,14 +528,16 @@ Content:
 Behavior:
 
 - Right vertical split.
-- Width from config.
+- Width from config on open; while open, preserve the configured width or the user's adjusted sidebar width across layout changes.
 - `buftype=nofile`, `readonly`, `modifiable=false`, `buflisted=false`.
 - Window uses `winfixwidth`.
-- Receives no Review Mode action mappings.
+- Receives only local quit/help mappings, including `q` and the configured Review Mode toggle key to quit Code Review.
 - Stores no durable data.
 - Rendering is derived from current state and durable Review data.
 - Legend remains fixed while the overview scrolls or re-renders.
-- If closed, recreate on next render, Review action, or `BufEnter` while Review Mode remains active.
+- If closed directly while a work window remains, recreate on the next render or window lifecycle event.
+- File explorers such as neo-tree can coexist with the sidebar; opening a file explorer must not close Review Mode.
+- If the last normal work window is closed or replaced and only auxiliary/plugin panes remain, Code Review removes its sidebar/footer and lets the editor exit or clean up the auxiliary-only layout.
 
 ## Comment Editor
 
@@ -584,7 +586,7 @@ The preview action validates the active Review and opens an editable scratch buf
 Buffer rules:
 
 - Opens in the current window, replacing the visible code buffer in that window.
-- Keeps Review Mode active and sidebar visible.
+- Keeps Review Mode active and sidebar visible while the preview is open.
 - `buftype=nofile`, `buflisted=false`, `bufhidden=wipe`, `swapfile=false`.
 - Receives no Review Mode action mappings.
 - Is editable.

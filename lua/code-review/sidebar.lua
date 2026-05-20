@@ -165,6 +165,43 @@ local function apply_window_options(win)
   end)
 end
 
+local option_profile_fields = {
+  "cursorline",
+  "cursorlineopt",
+  "foldcolumn",
+  "wrap",
+  "list",
+  "spell",
+  "number",
+  "relativenumber",
+  "signcolumn",
+  "winhighlight",
+  "winbar",
+}
+
+local function apply_option_profile(win, profile)
+  if not valid_win(win) then
+    return
+  end
+  for _, field in ipairs(option_profile_fields) do
+    if profile and profile[field] ~= nil then
+      pcall(function()
+        vim.wo[win][field] = profile[field]
+      end)
+    end
+  end
+  pcall(function()
+    vim.wo[win].eventignorewin = ""
+  end)
+  vim.wo[win].winfixwidth = false
+  vim.wo[win].winfixheight = false
+  if not profile or profile.winbar == nil then
+    pcall(function()
+      vim.wo[win].winbar = ""
+    end)
+  end
+end
+
 local function apply_buffer_options(buf, filetype)
   vim.bo[buf].buftype = "nofile"
   vim.bo[buf].filetype = filetype
@@ -208,9 +245,88 @@ local function apply_sidebar_keymaps(buf)
   vim.keymap.set("n", "q", function()
     require("code-review").quit()
   end, { buffer = buf, nowait = true, desc = "Quit Review Mode" })
+  local keymaps = config.get().keymaps
+  if keymaps.enabled and keymaps.toggle ~= false and keymaps.toggle ~= nil then
+    vim.keymap.set("n", keymaps.prefix .. keymaps.toggle, function()
+      require("code-review").quit()
+    end, { buffer = buf, nowait = true, desc = "Quit Review Mode" })
+  end
   vim.keymap.set("n", "?", function()
     require("code-review.sidebar").show_help()
   end, { buffer = buf, nowait = true, desc = "Show Code Review help" })
+end
+
+local function desired_width(sidebar)
+  return sidebar and sidebar.desired_width or config.get().sidebar.width
+end
+
+function M.apply_desired_width()
+  local s = state.get()
+  local sidebar = s.sidebar
+  if not sidebar or sidebar.reapplying_width then
+    return
+  end
+  local width = desired_width(sidebar)
+  if not width then
+    return
+  end
+  sidebar.reapplying_width = true
+  for _, win in ipairs({ sidebar.win, sidebar.footer_win }) do
+    if valid_win(win) and vim.api.nvim_win_get_width(win) ~= width then
+      pcall(vim.api.nvim_win_set_width, win, width)
+    end
+  end
+  sidebar.reapplying_width = false
+end
+
+function M.capture_width_from_sidebar()
+  local s = state.get()
+  local sidebar = s.sidebar
+  if not sidebar or sidebar.reapplying_width or not valid_win(sidebar.win) then
+    return
+  end
+  local current = vim.api.nvim_get_current_win()
+  if current ~= sidebar.win and current ~= sidebar.footer_win then
+    return
+  end
+  local width = vim.api.nvim_win_get_width(sidebar.win)
+  if width > 0 then
+    sidebar.desired_width = width
+  end
+end
+
+function M.handle_resize()
+  local s = state.get()
+  local sidebar = s.sidebar
+  if not sidebar then
+    return
+  end
+  local event = vim.v.event or {}
+  local resized = event.windows
+  if type(resized) == "table" then
+    local touched = false
+    for _, win in ipairs(resized) do
+      if win == sidebar.win or win == sidebar.footer_win then
+        touched = true
+        break
+      end
+    end
+    if not touched then
+      return
+    end
+  end
+  M.apply_desired_width()
+end
+
+function M.prepare_for_window_reuse()
+  local s = state.get()
+  local sidebar = s.sidebar
+  if not sidebar then
+    return
+  end
+  local profile = s.last_work_window_options
+  apply_option_profile(sidebar.win, profile)
+  apply_option_profile(sidebar.footer_win, profile)
 end
 
 local function ensure()
@@ -242,7 +358,15 @@ local function ensure()
   pcall(vim.api.nvim_buf_set_name, footer_bufnr, "Code Review Footer")
   apply_sidebar_keymaps(buf)
   apply_sidebar_keymaps(footer_bufnr)
-  s.sidebar = { buf = buf, win = win, footer_buf = footer_bufnr, footer_win = footer_win, filter = previous_filter }
+  s.sidebar = {
+    buf = buf,
+    win = win,
+    footer_buf = footer_bufnr,
+    footer_win = footer_win,
+    filter = previous_filter,
+    desired_width = config.get().sidebar.width,
+  }
+  M.apply_desired_width()
   if valid_win(current) and vim.api.nvim_get_current_win() ~= current then
     with_winenter_ignored(function()
       vim.api.nvim_set_current_win(current)
@@ -533,6 +657,7 @@ function M.render()
   set_readonly_lines(buf, lines)
   apply_highlights(buf, highlights)
   set_readonly_lines(footer_buf, footer_lines(width))
+  M.apply_desired_width()
   if view and valid_win(win) then
     pcall(vim.api.nvim_win_call, win, function()
       vim.fn.winrestview(view)

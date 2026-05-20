@@ -14,6 +14,53 @@ describe("sidebar", function()
     assert.equals(expected, sidebar_window_count())
   end
 
+  local function code_review_ui_window_count()
+    local count = 0
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+      local buf = vim.api.nvim_win_get_buf(win)
+      local ft = vim.bo[buf].filetype
+      if ft == "code-review-sidebar" or ft == "code-review-sidebar-footer" then
+        count = count + 1
+      end
+    end
+    return count
+  end
+
+  local function set_neo_tree_window(win)
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_win_set_buf(win, buf)
+    vim.bo[buf].buftype = "nofile"
+    vim.bo[buf].filetype = "neo-tree"
+    vim.b[buf].neo_tree_source = "filesystem"
+    return buf
+  end
+
+  local function wipe_normal_file_buffers_except(keep)
+    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+      if
+        buf ~= keep
+        and vim.api.nvim_buf_is_valid(buf)
+        and vim.bo[buf].buftype == ""
+        and (vim.bo[buf].buflisted or vim.api.nvim_buf_get_name(buf) ~= "")
+      then
+        pcall(vim.api.nvim_buf_delete, buf, { force = true })
+      end
+    end
+  end
+
+  local function stub_auxiliary_exit(code_review)
+    local calls = 0
+    local previous = code_review._exit_auxiliary_layout
+    code_review._exit_auxiliary_layout = function()
+      calls = calls + 1
+    end
+    return function()
+      return calls
+    end, function()
+      code_review._exit_auxiliary_layout = previous
+    end
+  end
+
   local function is_centered(line, text, width)
     local start_col = line:find(text, 1, true)
     if not start_col then
@@ -31,8 +78,9 @@ describe("sidebar", function()
   end
 
   local function has_normal_map(buf, lhs)
+    local normalized = vim.api.nvim_replace_termcodes(lhs, true, true, true)
     for _, map in ipairs(vim.api.nvim_buf_get_keymap(buf, "n")) do
-      if map.lhs == lhs then
+      if map.lhs == lhs or map.lhs == normalized then
         return true
       end
     end
@@ -47,7 +95,9 @@ describe("sidebar", function()
     vim.fn.mkdir(project .. "/.git", "p")
     vim.fn.writefile({ "x" }, project .. "/x.lua")
     config.setup({ storage = { dir = project .. "/store" }, sidebar = { width = 32 } })
+    pcall(vim.cmd, "only")
     vim.cmd.edit(project .. "/x.lua")
+    wipe_normal_file_buffers_except(vim.api.nvim_get_current_buf())
     return code_review, state
   end
 
@@ -70,6 +120,249 @@ describe("sidebar", function()
     assert.equals(code_win, vim.api.nvim_get_current_win())
     code_review.quit()
   end
+
+  it("does not start Review Mode from a bare unnamed buffer", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    config.setup({ storage = { dir = project .. "/store" }, sidebar = { width = 32 } })
+    pcall(vim.cmd, "only")
+    vim.cmd.enew()
+    wipe_normal_file_buffers_except(vim.api.nvim_get_current_buf())
+
+    code_review.start()
+
+    assert.is_false(state.is_active())
+    assert.equals(0, code_review_ui_window_count())
+  end)
+
+  it("does not start Review Mode from neo-tree without a visible file window", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    config.setup({ storage = { dir = project .. "/store" }, sidebar = { width = 32 } })
+    pcall(vim.cmd, "only")
+    vim.cmd.enew()
+    wipe_normal_file_buffers_except(vim.api.nvim_get_current_buf())
+    set_neo_tree_window(vim.api.nvim_get_current_win())
+
+    code_review.start()
+
+    assert.is_false(state.is_active())
+    assert.equals(0, code_review_ui_window_count())
+  end)
+
+  it("starts from a visible file window when focus is in neo-tree", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" }, sidebar = { width = 32 } })
+    pcall(vim.cmd, "only")
+    vim.cmd.edit(project .. "/x.lua")
+    wipe_normal_file_buffers_except(vim.api.nvim_get_current_buf())
+    local code_win = vim.api.nvim_get_current_win()
+    vim.cmd.vsplit()
+    set_neo_tree_window(vim.api.nvim_get_current_win())
+
+    code_review.start()
+
+    assert.is_true(state.is_active())
+    assert.equals(require("code-review.path").realpath(project), state.get().root)
+    assert.equals(code_win, vim.api.nvim_get_current_win())
+    assert.equals(2, code_review_ui_window_count())
+    code_review.quit()
+  end)
+
+  it("keeps Review Mode active and preserves configured width when neo-tree opens", function()
+    local code_review, state = start_sidebar_project()
+    code_review.start()
+    local sidebar = state.get().sidebar
+    assert.equals(32, sidebar.desired_width)
+
+    vim.cmd.vsplit()
+    set_neo_tree_window(vim.api.nvim_get_current_win())
+    vim.api.nvim_win_set_width(sidebar.win, 20)
+    vim.api.nvim_win_set_width(sidebar.footer_win, 20)
+    require("code-review.sidebar").handle_resize()
+
+    assert.is_true(state.is_active())
+    assert.equals(32, sidebar.desired_width)
+    assert.equals(32, vim.api.nvim_win_get_width(sidebar.win))
+    assert.equals(32, vim.api.nvim_win_get_width(sidebar.footer_win))
+    code_review.quit()
+  end)
+
+  it("preserves user-adjusted sidebar width across later layout pressure", function()
+    local code_review, state = start_sidebar_project()
+    code_review.start()
+    local sidebar = state.get().sidebar
+    vim.api.nvim_set_current_win(sidebar.win)
+    vim.api.nvim_win_set_width(sidebar.win, 24)
+    require("code-review.sidebar").capture_width_from_sidebar()
+
+    vim.api.nvim_win_set_width(sidebar.win, 18)
+    vim.api.nvim_win_set_width(sidebar.footer_win, 18)
+    require("code-review.sidebar").handle_resize()
+
+    assert.equals(24, sidebar.desired_width)
+    assert.equals(24, vim.api.nvim_win_get_width(sidebar.win))
+    assert.equals(24, vim.api.nvim_win_get_width(sidebar.footer_win))
+    code_review.quit()
+  end)
+
+  it("schedules editor exit when the last work window is closed", function()
+    local code_review, state = start_sidebar_project()
+    local exit_calls, restore_exit = stub_auxiliary_exit(code_review)
+    code_review.start()
+    local code_win = vim.api.nvim_get_current_win()
+    vim.api.nvim_set_current_win(code_win)
+
+    vim.cmd.close()
+
+    vim.wait(200, function()
+      return exit_calls() == 1
+    end)
+    assert.is_true(state.is_active())
+    assert.equals(2, code_review_ui_window_count())
+    assert.equals(1, exit_calls())
+    restore_exit()
+    code_review.quit()
+  end)
+
+  it("keeps auxiliary panes in place while the editor exit is pending", function()
+    local code_review, state = start_sidebar_project()
+    local exit_calls, restore_exit = stub_auxiliary_exit(code_review)
+    code_review.start()
+    local code_win = vim.api.nvim_get_current_win()
+    local sidebar = state.get().sidebar
+    vim.api.nvim_set_current_win(code_win)
+
+    vim.cmd.close()
+    vim.wait(200, function()
+      return exit_calls() == 1
+    end)
+
+    assert.is_true(state.is_active())
+    assert.is_true(vim.api.nvim_win_is_valid(sidebar.win))
+    assert.is_true(vim.api.nvim_win_is_valid(sidebar.footer_win))
+    assert.equals(1, exit_calls())
+    restore_exit()
+    code_review.quit()
+  end)
+
+  it("schedules editor exit when the last work window becomes neo-tree", function()
+    local code_review, state = start_sidebar_project()
+    local exit_calls, restore_exit = stub_auxiliary_exit(code_review)
+    code_review.start()
+    local code_win = vim.api.nvim_get_current_win()
+
+    set_neo_tree_window(code_win)
+
+    vim.wait(200, function()
+      return exit_calls() == 1
+    end)
+    assert.is_true(state.is_active())
+    assert.equals(2, code_review_ui_window_count())
+    assert.equals(1, exit_calls())
+    restore_exit()
+    code_review.quit()
+  end)
+
+  it("keeps Review Mode active when deleting a file leaves an unnamed work window", function()
+    local code_review, state = start_sidebar_project()
+    code_review.start()
+    local code_win = vim.api.nvim_get_current_win()
+    local code_buf = vim.api.nvim_win_get_buf(code_win)
+    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+      if buf ~= code_buf and vim.bo[buf].buflisted then
+        pcall(vim.api.nvim_buf_delete, buf, { force = true })
+      end
+    end
+
+    vim.cmd("bdelete " .. code_buf)
+    vim.wait(100, function()
+      return false
+    end)
+
+    assert.is_true(state.is_active())
+    assert.equals("", vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(code_win)))
+    assert.equals(2, code_review_ui_window_count())
+    code_review.quit()
+  end)
+
+  it("keeps Review Mode active while an outside-root work window is visible", function()
+    local code_review, state = start_sidebar_project()
+    local code_win = vim.api.nvim_get_current_win()
+    local outside = vim.fn.tempname() .. ".lua"
+    vim.fn.writefile({ "outside" }, outside)
+    vim.cmd.vsplit(outside)
+    local outside_win = vim.api.nvim_get_current_win()
+    vim.api.nvim_set_current_win(code_win)
+    code_review.start()
+
+    vim.api.nvim_set_current_win(code_win)
+    vim.cmd.close()
+    vim.wait(100, function()
+      return false
+    end)
+
+    assert.is_true(state.is_active())
+    assert.equals(outside_win, vim.api.nvim_get_current_win())
+    assert.equals(require("code-review.path").realpath(outside), vim.api.nvim_buf_get_name(0))
+    assert.equals(2, code_review_ui_window_count())
+    code_review.quit()
+  end)
+
+  it("keeps Review Mode active when closing one of two work windows", function()
+    local code_review, state = start_sidebar_project()
+    local exit_calls, restore_exit = stub_auxiliary_exit(code_review)
+    local project = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":h")
+    vim.fn.writefile({ "y" }, project .. "/y.lua")
+    vim.cmd.vsplit(project .. "/y.lua")
+    local second_win = vim.api.nvim_get_current_win()
+    code_review.start()
+
+    vim.api.nvim_set_current_win(second_win)
+    vim.cmd.close()
+    vim.wait(100, function()
+      return false
+    end)
+
+    assert.is_true(state.is_active())
+    assert.equals(2, code_review_ui_window_count())
+    assert.equals(0, exit_calls())
+    restore_exit()
+    code_review.quit()
+  end)
+
+  it("closes only the auxiliary Review tab when another tab has work", function()
+    local code_review, state = start_sidebar_project()
+    local exit_calls, restore_exit = stub_auxiliary_exit(code_review)
+    vim.cmd.tabnew()
+    local other = vim.fn.tempname() .. ".lua"
+    vim.fn.writefile({ "other" }, other)
+    vim.cmd.edit(other)
+    local other_tab = vim.api.nvim_get_current_tabpage()
+    vim.cmd.tabprevious()
+    code_review.start()
+    local code_win = vim.api.nvim_get_current_win()
+
+    vim.api.nvim_set_current_win(code_win)
+    vim.cmd.close()
+    local closed = vim.wait(500, function()
+      return vim.api.nvim_get_current_tabpage() == other_tab and not state.is_active()
+    end)
+
+    assert.is_true(closed)
+    assert.equals(1, #vim.api.nvim_list_tabpages())
+    assert.equals(0, exit_calls())
+    restore_exit()
+  end)
 
   it("keeps at most one sidebar throughout the Review lifecycle", function()
     local code_review = require("code-review")
@@ -192,6 +485,20 @@ describe("sidebar", function()
     assert.equals(nil, state.get().sidebar)
     assert.equals(1, #vim.api.nvim_list_wins())
     assert.equals(code_win, vim.api.nvim_get_current_win())
+  end)
+
+  it("maps the configured toggle key to quit from sidebar panes", function()
+    local code_review, state = start_sidebar_project()
+    code_review.start()
+    local sidebar = state.get().sidebar
+
+    assert.is_true(has_normal_map(sidebar.buf, "<leader>rt"))
+    assert.is_true(has_normal_map(sidebar.footer_buf, "<leader>rt"))
+    vim.api.nvim_set_current_win(sidebar.footer_win)
+    vim.cmd("normal \\rt")
+
+    assert.is_false(state.is_active())
+    assert.equals(1, #vim.api.nvim_list_wins())
   end)
 
   it("shows centered header chrome and vertically centers empty messages", function()

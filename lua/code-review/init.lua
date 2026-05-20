@@ -1,5 +1,6 @@
 local config = require("code-review.config")
 local highlights = require("code-review.highlights")
+local navigation = require("code-review.navigation")
 local notify = require("code-review.notify")
 local root = require("code-review.root")
 local state = require("code-review.state")
@@ -9,6 +10,7 @@ local M = {}
 
 local commands_registered = false
 local sidebar_refresh_ms = 60000
+local lifecycle_exit_scheduled = false
 
 local function stop_sidebar_timer(current)
   if current.sidebar_timer and not current.sidebar_timer:is_closing() then
@@ -61,6 +63,110 @@ local function start_sidebar_timer()
   end)
 end
 
+local option_profile_fields = {
+  "cursorline",
+  "cursorlineopt",
+  "foldcolumn",
+  "wrap",
+  "list",
+  "spell",
+  "number",
+  "relativenumber",
+  "signcolumn",
+  "winhighlight",
+  "winbar",
+}
+
+local function capture_work_window_options(win)
+  if not navigation.work_window(win) then
+    return
+  end
+  local profile = {}
+  for _, field in ipairs(option_profile_fields) do
+    pcall(function()
+      profile[field] = vim.wo[win][field]
+    end)
+  end
+  state.get().last_work_window_options = profile
+end
+
+local function refresh_work_window_snapshot()
+  if not state.is_active() then
+    return
+  end
+  local s = state.get()
+  s.work_windows = navigation.snapshot_work_windows()
+  local current = vim.api.nvim_get_current_win()
+  if navigation.work_window(current) then
+    capture_work_window_options(current)
+  end
+end
+
+local function only_auxiliary_windows_remain(tab)
+  local wins = vim.api.nvim_tabpage_list_wins(tab or 0)
+  if #wins == 0 then
+    return false
+  end
+  for _, win in ipairs(wins) do
+    if navigation.work_window(win) then
+      return false
+    end
+    if not navigation.aux_window(win) then
+      return false
+    end
+  end
+  return true
+end
+
+local function other_tabs_have_work_window()
+  local current_tab = vim.api.nvim_get_current_tabpage()
+  for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
+    if tab ~= current_tab and #navigation.tab_work_windows(tab) > 0 then
+      return true
+    end
+  end
+  return false
+end
+
+function M._exit_auxiliary_layout()
+  local s = state.get()
+  if s.auxiliary_exit_requested then
+    return
+  end
+  s.auxiliary_exit_requested = true
+  vim.schedule(function()
+    vim.cmd("confirm qall")
+  end)
+end
+
+local function schedule_auxiliary_only_check()
+  local s = state.get()
+  if lifecycle_exit_scheduled or s.tearing_down then
+    return
+  end
+  local session_id = s.session_id
+  lifecycle_exit_scheduled = true
+  vim.schedule(function()
+    lifecycle_exit_scheduled = false
+    if not state.is_active() or state.get().session_id ~= session_id then
+      return
+    end
+    if #navigation.tab_work_windows(0) > 0 or not only_auxiliary_windows_remain(0) then
+      return
+    end
+    local other_tabs_had_work = other_tabs_have_work_window()
+    if other_tabs_had_work then
+      state.get().tearing_down = true
+      M.quit()
+      if #vim.api.nvim_list_tabpages() > 1 then
+        pcall(vim.cmd, "tabclose")
+      end
+      return
+    end
+    M._exit_auxiliary_layout()
+  end)
+end
+
 local function create_augroup()
   local s = state.get()
   if s.augroup then
@@ -83,7 +189,13 @@ local function create_augroup()
       local current = state.get()
       local buf = vim.api.nvim_get_current_buf()
       if current.active and current.sidebar and (current.sidebar.buf == buf or current.sidebar.footer_buf == buf) then
-        M.quit()
+        if #navigation.tab_work_windows(0) == 0 and only_auxiliary_windows_remain(0) then
+          M._exit_auxiliary_layout()
+        else
+          M.quit()
+        end
+      elseif current.active and #navigation.tab_work_windows(0) == 0 and only_auxiliary_windows_remain(0) then
+        M._exit_auxiliary_layout()
       end
     end,
   })
@@ -93,10 +205,63 @@ local function create_augroup()
       require("code-review.sidebar").update_filter_for_buffer(args.buf)
     end,
   })
-  vim.api.nvim_create_autocmd({ "BufEnter", "TextChanged", "TextChangedI", "BufWritePost", "BufDelete", "BufUnload", "DirChanged", "VimResized", "WinResized" }, {
+  vim.api.nvim_create_autocmd("WinClosed", {
     group = s.augroup,
     callback = function(args)
-      if args.event == "VimResized" or args.event == "WinResized" then
+      local current = state.get()
+      if not current.active or current.tearing_down or current.recreating_sidebar then
+        return
+      end
+      local closing = tonumber(args.match)
+      if
+        closing
+        and current.sidebar
+        and (closing == current.sidebar.win or closing == current.sidebar.footer_win)
+        and #navigation.tab_work_windows(0) > 0
+      then
+        vim.schedule(function()
+          if state.is_active() then
+            state.get().recreating_sidebar = true
+            require("code-review.sidebar").close()
+            require("code-review.sidebar").render()
+            state.get().recreating_sidebar = false
+          end
+        end)
+        return
+      end
+      local was_work = closing and current.work_windows and current.work_windows[closing]
+      refresh_work_window_snapshot()
+      if was_work then
+        schedule_auxiliary_only_check()
+      end
+    end,
+  })
+  vim.api.nvim_create_autocmd({ "WinEnter", "BufWinEnter", "BufEnter" }, {
+    group = s.augroup,
+    callback = function()
+      refresh_work_window_snapshot()
+      require("code-review.sidebar").capture_width_from_sidebar()
+      schedule_auxiliary_only_check()
+    end,
+  })
+  vim.api.nvim_create_autocmd("WinLeave", {
+    group = s.augroup,
+    callback = function()
+      require("code-review.sidebar").capture_width_from_sidebar()
+    end,
+  })
+  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "BufWritePost", "BufDelete", "BufUnload", "DirChanged", "VimResized", "WinResized" }, {
+    group = s.augroup,
+    callback = function(args)
+      if args.event == "BufDelete" or args.event == "BufUnload" then
+        refresh_work_window_snapshot()
+        schedule_auxiliary_only_check()
+        if state.is_active() then
+          require("code-review.sidebar").render()
+        end
+        return
+      elseif args.event == "VimResized" or args.event == "WinResized" then
+        require("code-review.sidebar").handle_resize()
         require("code-review.sidebar").render()
       elseif args.event == "TextChanged" or args.event == "TextChangedI" then
         debounce_stale_refresh(args.buf)
@@ -143,14 +308,25 @@ function M.start()
   if state.is_active() then
     return
   end
-  local project_root = root.detect(0)
+  local source_win = navigation.find_start_file_window()
+  if not source_win then
+    notify.warn("Open a file buffer before starting Code Review.")
+    return
+  end
+  local project_root = root.detect(vim.api.nvim_win_get_buf(source_win))
+  source_win = navigation.find_source_window_for_root(project_root) or source_win
   local handle = storage.load(project_root)
   if handle.blocked then
     return
   end
   state.activate(project_root, handle.root_hash, handle.store, handle)
+  lifecycle_exit_scheduled = false
+  if vim.api.nvim_win_is_valid(source_win) then
+    vim.api.nvim_set_current_win(source_win)
+  end
   require("code-review.sidebar").render()
   create_augroup()
+  refresh_work_window_snapshot()
   start_sidebar_timer()
   require("code-review.highlights").refresh()
   if handle.store.last_active_review_id then
@@ -165,6 +341,8 @@ function M.quit()
     return
   end
   local s = state.get()
+  lifecycle_exit_scheduled = false
+  s.tearing_down = true
   pcall(require("code-review.voice").stop)
   storage.flush(s.storage)
   if s.augroup then
