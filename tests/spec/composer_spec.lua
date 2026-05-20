@@ -324,6 +324,36 @@ describe("comment composer", function()
     code_review.quit()
   end)
 
+  it("registers composer-local which-key labels for context-sensitive actions", function()
+    local previous = package.loaded["which-key"]
+    local calls = {}
+    package.loaded["which-key"] = {
+      add = function(spec)
+        calls[#calls + 1] = spec
+      end,
+    }
+
+    local code_review, actions, state = start_project()
+    select_lines(actions, 1, 1)
+    local composer = state.get().composer
+
+    local by_buffer = {}
+    for _, call in ipairs(calls) do
+      for _, item in ipairs(call) do
+        by_buffer[item.buffer] = by_buffer[item.buffer] or {}
+        by_buffer[item.buffer][item[1]] = item.desc
+      end
+    end
+    assert.equals("Delete Code Review comment or draft", by_buffer[composer.body_buf]["<leader>d"])
+    assert.equals("Delete draft File Reference", by_buffer[composer.refs_buf]["<leader>d"])
+    assert.equals("Toggle Code Review voice", by_buffer[composer.body_buf]["<leader><Space>"])
+    assert.equals("Toggle Code Review voice", by_buffer[composer.refs_buf]["<leader><Space>"])
+
+    require("code-review.composer").cancel()
+    code_review.quit()
+    package.loaded["which-key"] = previous
+  end)
+
   it("opens compact composer help and maps q and escape to close it", function()
     local code_review, actions, state = start_project()
     select_lines(actions, 1, 1)

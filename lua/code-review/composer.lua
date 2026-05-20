@@ -276,6 +276,24 @@ local function reference_action()
   end)
 end
 
+local function register_buffer_which_key(buf, delete_desc)
+  local ok, which_key = pcall(require, "which-key")
+  if not ok then
+    return
+  end
+  if which_key.add then
+    pcall(which_key.add, {
+      { "<leader>d", desc = delete_desc, mode = "n", buffer = buf },
+      { "<leader><Space>", desc = "Toggle Code Review voice", mode = "n", buffer = buf },
+    })
+  elseif which_key.register then
+    pcall(which_key.register, {
+      ["<leader>d"] = delete_desc,
+      ["<leader><Space>"] = "Toggle Code Review voice",
+    }, { mode = "n", buffer = buf })
+  end
+end
+
 local function apply_common_keymaps(buf)
   vim.keymap.set("n", "<leader><Space>", function()
     require("code-review.voice").toggle()
@@ -296,6 +314,7 @@ local function apply_body_keymaps(buf)
   vim.keymap.set("n", "<leader>d", function()
     require("code-review.composer").delete_comment_or_draft()
   end, { buffer = buf, nowait = true, desc = "Delete Code Review comment or draft" })
+  register_buffer_which_key(buf, "Delete Code Review comment or draft")
   vim.keymap.set("n", "<CR>", function()
     require("code-review.composer").submit()
   end, { buffer = buf, nowait = true, desc = "Submit Code Review comment" })
@@ -313,6 +332,7 @@ local function apply_refs_keymaps(buf)
   vim.keymap.set("n", "<leader>d", function()
     confirm_delete_reference(current_ref_index(state.get().composer))
   end, { buffer = buf, nowait = true, desc = "Delete draft File Reference" })
+  register_buffer_which_key(buf, "Delete draft File Reference")
   vim.keymap.set("n", "q", function()
     require("code-review.composer").cancel()
   end, { buffer = buf, nowait = true, desc = "Cancel Code Review comment" })
