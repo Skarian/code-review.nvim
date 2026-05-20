@@ -334,10 +334,11 @@ local function build_header(review, filter, width)
 end
 
 local function scope_line(comment_count, filter)
+  local noun = comment_count == 1 and "Comment" or "Comments"
   if filter and filter.ids then
-    return string.format("%d Comments on this line only", comment_count)
+    return string.format("%d %s on this line only", comment_count, noun)
   end
-  return string.format("%d Total Comments", comment_count)
+  return string.format("%d Total %s", comment_count, noun)
 end
 
 local function vertically_centered_message(text, width, height)
