@@ -151,21 +151,27 @@ function M.open_composer_stack(body_lines)
   }
 end
 
-function M.open_composer_help(lines)
+function M.open_help(opts)
+  opts = opts or {}
+  local title = opts.title or " Code Review Help "
+  local name = opts.name or "Code Review Help"
+  local lines = opts.lines or {}
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].buftype = "nofile"
   vim.bo[buf].buflisted = false
   vim.bo[buf].bufhidden = "wipe"
   vim.bo[buf].swapfile = false
-  pcall(vim.api.nvim_buf_set_name, buf, "Code Review Composer Help")
+  pcall(vim.api.nvim_buf_set_name, buf, name)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.bo[buf].modifiable = false
+  local width = opts.width or math.min(104, math.max(72, math.floor(vim.o.columns * 0.72)))
+  local height = opts.height or math.min(#lines + 2, math.max(14, math.floor(vim.o.lines * 0.62)))
   local result = snacks().win({
     buf = buf,
-    title = " Code Review Composer Help ",
+    title = title,
     border = "rounded",
-    width = math.min(72, math.max(48, math.floor(vim.o.columns * 0.5))),
-    height = math.min(#lines + 2, math.max(8, math.floor(vim.o.lines * 0.35))),
+    width = width,
+    height = height,
     wo = {
       number = false,
       relativenumber = false,
@@ -186,9 +192,19 @@ function M.open_composer_help(lines)
       pcall(vim.api.nvim_buf_delete, buf, { force = true })
     end
   end
-  vim.keymap.set("n", "q", close, { buffer = buf, nowait = true, desc = "Close Code Review composer help" })
-  vim.keymap.set("n", "<Esc>", close, { buffer = buf, nowait = true, desc = "Close Code Review composer help" })
+  vim.keymap.set("n", "q", close, { buffer = buf, nowait = true, desc = "Close Code Review help" })
+  vim.keymap.set("n", "<Esc>", close, { buffer = buf, nowait = true, desc = "Close Code Review help" })
   return win, handle, buf
+end
+
+function M.open_composer_help(lines)
+  return M.open_help({
+    name = "Code Review Composer Help",
+    title = " Code Review Composer Help ",
+    lines = lines,
+    width = math.min(72, math.max(48, math.floor(vim.o.columns * 0.5))),
+    height = math.min(#lines + 2, math.max(8, math.floor(vim.o.lines * 0.35))),
+  })
 end
 
 function M.pick_comments(items, callbacks)

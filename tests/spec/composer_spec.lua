@@ -150,8 +150,9 @@ describe("comment composer", function()
     assert.truthy(win)
     assert.is_true(vim.api.nvim_buf_is_valid(buf))
     local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
-    assert.truthy(text:find("Composer keys", 1, true))
-    assert.truthy(text:find("Space starts recording", 1, true))
+    assert.truthy(text:find("code-review.nvim - Composer Help", 1, true))
+    assert.truthy(text:find("Open a picker with Delete and Go to", 1, true))
+    assert.truthy(text:find("Start, stop, or retry voice recording", 1, true))
     local maps = vim.api.nvim_buf_get_keymap(buf, "n")
     local seen_q, seen_esc = false, false
     for _, map in ipairs(maps) do

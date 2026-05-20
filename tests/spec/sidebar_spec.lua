@@ -30,6 +30,15 @@ describe("sidebar", function()
     end
   end
 
+  local function has_normal_map(buf, lhs)
+    for _, map in ipairs(vim.api.nvim_buf_get_keymap(buf, "n")) do
+      if map.lhs == lhs then
+        return true
+      end
+    end
+    return false
+  end
+
   local function start_sidebar_project()
     local code_review = require("code-review")
     local config = require("code-review.config")
@@ -214,7 +223,7 @@ describe("sidebar", function()
     code_review.quit()
   end)
 
-  it("defines sidebar highlight groups and keeps legend fixed in the footer", function()
+  it("defines sidebar highlight groups and keeps compact help legend fixed in the footer", function()
     local code_review = require("code-review")
     local config = require("code-review.config")
     local actions = require("code-review.actions")
@@ -235,10 +244,12 @@ describe("sidebar", function()
     local sidebar = state.get().sidebar
     local width = vim.api.nvim_win_get_width(sidebar.win)
     local footer_lines = vim.api.nvim_buf_get_lines(sidebar.footer_buf, 0, -1, false)
-    assert.is_true(is_centered(footer_lines[2], "ra new   rr append   re edit", width))
-    assert.truthy(footer_lines[3]:find("rR reviews", 1, true))
-    assert.truthy(footer_lines[4]:find("j/k scroll", 1, true))
-    assert.is_true(is_centered(footer_lines[5], "q quit", width))
+    assert.equals(1, #footer_lines)
+    assert.is_true(is_centered(footer_lines[1], "? help   q quit", width))
+    assert.is_true(has_normal_map(sidebar.buf, "?"))
+    assert.is_true(has_normal_map(sidebar.footer_buf, "?"))
+    assert.is_true(has_normal_map(sidebar.buf, "q"))
+    assert.is_true(has_normal_map(sidebar.footer_buf, "q"))
     assert.truthy(vim.api.nvim_get_hl(0, { name = "CodeReviewSidebarHeader" }).bold)
     assert.truthy(vim.api.nvim_get_hl(0, { name = "CodeReviewSidebarIncomplete" }))
     assert.truthy(vim.api.nvim_get_hl(0, { name = "CodeReviewSidebarStale" }))
@@ -247,7 +258,39 @@ describe("sidebar", function()
     assert.is_false(vim.wo[sidebar.win].wrap)
     assert.equals("no", vim.wo[sidebar.win].signcolumn)
     assert.equals("0", vim.wo[sidebar.win].foldcolumn)
-    assert.equals(5, vim.api.nvim_win_get_height(sidebar.footer_win))
+    assert.equals(1, vim.api.nvim_win_get_height(sidebar.footer_win))
+    code_review.quit()
+  end)
+
+  it("opens sidebar help with review mode and configured keymaps", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" }, keymaps = { prefix = "<leader>x" } })
+    vim.cmd.edit(project .. "/x.lua")
+    code_review.start()
+    local sidebar = state.get().sidebar
+    vim.api.nvim_set_current_win(sidebar.win)
+
+    local win, _, buf = require("code-review.sidebar").show_help()
+    assert.truthy(win)
+    assert.is_true(vim.api.nvim_buf_is_valid(buf))
+    local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+    assert.truthy(text:find("Overview", 1, true))
+    assert.truthy(text:find("Normal mode", 1, true))
+    assert.truthy(text:find("Visual mode", 1, true))
+    assert.truthy(text:find("Sidebar buffer", 1, true))
+    assert.truthy(text:find("<leader>xR", 1, true))
+    assert.truthy(text:find("<leader>xa", 1, true))
+    assert.truthy(text:find("create, delete, or switch reviews", 1, true))
+    assert.truthy(text:find("read%-only throwaway buffer"))
+    assert.truthy(has_normal_map(buf, "q"))
+    assert.truthy(has_normal_map(buf, "<Esc>"))
+    pcall(vim.api.nvim_win_close, win, true)
+    pcall(vim.api.nvim_buf_delete, buf, { force = true })
     code_review.quit()
   end)
 

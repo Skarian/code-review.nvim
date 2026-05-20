@@ -3,11 +3,12 @@ local model = require("code-review.model")
 local path = require("code-review.path")
 local state = require("code-review.state")
 local time = require("code-review.time")
+local ui = require("code-review.ui")
 
 local M = {}
 local ns = vim.api.nvim_create_namespace("code-review.nvim.sidebar")
 local pad = "  "
-local footer_height = 5
+local footer_height = 1
 local render_scheduled = false
 
 local function truncate_to_width(text, width)
@@ -53,14 +54,67 @@ local function statusline_escape(text)
 end
 
 local function footer_lines(width)
-  local rule_width = math.max(12, width - 4)
   return {
-    center_line(string.rep("-", rule_width), width),
-    center_line("ra new   rr append   re edit", width),
-    center_line("rR reviews   rp preview", width),
-    center_line("j/k scroll   Ctrl-D/Ctrl-U page", width),
-    center_line("q quit", width),
+    center_line("? help   q quit", width),
   }
+end
+
+local function configured_key(action)
+  local cfg = config.get().keymaps
+  if not cfg.enabled then
+    return nil
+  end
+  local suffix = cfg[action]
+  if suffix == false or suffix == nil then
+    return nil
+  end
+  return cfg.prefix .. suffix
+end
+
+local function add_key_line(lines, key, description)
+  if key then
+    lines[#lines + 1] = string.format("  %-12s %s", key, description)
+  end
+end
+
+local function sidebar_help_lines()
+  local lines = {
+    "Overview",
+    "  The sidebar lists comments for the active review",
+    "  A referenced source line is a line included in at least one comment",
+    "  On a referenced source line, the sidebar filters to matching comments",
+    "  Elsewhere, it lists all comments",
+    "  The sidebar is a read-only throwaway buffer",
+    "",
+    "Normal mode",
+    "  Key          Action",
+  }
+  if config.get().keymaps.enabled then
+    add_key_line(lines, configured_key("review_picker"), "Open the review picker to create, delete, or switch reviews")
+    add_key_line(lines, configured_key("edit_comment"), "Open the comment picker")
+    lines[#lines + 1] = "                Enter opens the comment editor; in picker Normal mode, d deletes and o goes to the comment"
+    add_key_line(lines, configured_key("edit_comment_under_cursor"), "Open the comment on the current line")
+    lines[#lines + 1] = "                If more than one comment matches, choose from the picker"
+    add_key_line(lines, configured_key("preview"), "Preview the current review in a throwaway buffer")
+    add_key_line(lines, configured_key("quit"), "Quit Code Review")
+  else
+    lines[#lines + 1] = "  Default keymaps are disabled by configuration"
+  end
+  vim.list_extend(lines, {
+    "",
+    "Visual mode",
+    "  Key          Action",
+  })
+  add_key_line(lines, configured_key("add_reference"), "Create a comment from the selected lines")
+  add_key_line(lines, configured_key("append_reference"), "Add a File Reference to a comment")
+  vim.list_extend(lines, {
+    "",
+    "Sidebar buffer",
+    "  Key          Action",
+    "  ?            Show help",
+    "  q            Quit Code Review",
+  })
+  return lines
 end
 
 local function valid_win(win)
@@ -154,6 +208,9 @@ local function apply_sidebar_keymaps(buf)
   vim.keymap.set("n", "q", function()
     require("code-review").quit()
   end, { buffer = buf, nowait = true, desc = "Quit Review Mode" })
+  vim.keymap.set("n", "?", function()
+    require("code-review.sidebar").show_help()
+  end, { buffer = buf, nowait = true, desc = "Show Code Review help" })
 end
 
 local function ensure()
@@ -468,6 +525,14 @@ function M.close()
     end
   end
   s.sidebar = nil
+end
+
+function M.show_help()
+  return ui.open_help({
+    name = "Code Review Help",
+    title = " code-review.nvim - Sidebar Help ",
+    lines = sidebar_help_lines(),
+  })
 end
 
 return M
