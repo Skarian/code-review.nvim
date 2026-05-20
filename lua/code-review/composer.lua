@@ -236,6 +236,10 @@ local function confirm_delete_reference(index)
     notify.warn("Move to a draft File Reference row before deleting.")
     return
   end
+  if #composer.references == 1 then
+    notify.warn("Keep at least one File Reference on the comment.")
+    return
+  end
   vim.ui.select({ "Delete", "Cancel" }, { prompt = "Delete draft File Reference?" }, function(choice)
     if choice ~= "Delete" then
       return

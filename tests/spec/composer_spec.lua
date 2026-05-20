@@ -433,21 +433,26 @@ describe("comment composer", function()
     code_review.quit()
   end)
 
-  it("maps leader delete in references to delete the focused File Reference", function()
+  it("keeps the last File Reference when leader delete is requested", function()
     local code_review, actions, state = start_project()
     select_lines(actions, 1, 1)
     local composer = state.get().composer
     require("code-review.composer").focus_references()
     vim.api.nvim_win_set_cursor(composer.refs_win, { 1, 0 })
+    local messages = {}
+    local old_notify = vim.notify
     local old_select = vim.ui.select
-    vim.ui.select = function(_, _, cb)
-      cb("Delete")
+    vim.notify = function(message)
+      messages[#messages + 1] = message
+    end
+    vim.ui.select = function()
+      error("delete confirmation should not open for the last File Reference")
     end
     get_normal_map(composer.refs_buf, "<Leader>d").callback()
+    vim.notify = old_notify
     vim.ui.select = old_select
-    assert.equals(0, #composer.references)
-    require("code-review.composer").submit()
-    assert.equals("composer", state.mode())
+    assert.equals(1, #composer.references)
+    assert.equals("Keep at least one File Reference on the comment.", messages[1])
     require("code-review.composer").cancel()
     code_review.quit()
   end)
