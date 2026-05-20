@@ -31,6 +31,19 @@ describe("comment composer", function()
     return table.concat(vim.api.nvim_buf_get_lines(composer.refs_buf, 0, -1, false), "\n")
   end
 
+  local function get_normal_map(buf, lhs)
+    local normalized = vim.api.nvim_replace_termcodes(lhs, true, true, true)
+    for _, map in ipairs(vim.api.nvim_buf_get_keymap(buf, "n")) do
+      if map.lhs == lhs or map.lhs == normalized then
+        return map
+      end
+    end
+  end
+
+  local function has_normal_map(buf, lhs)
+    return get_normal_map(buf, lhs) ~= nil
+  end
+
   it("accepts Snacks.win when it is a callable table", function()
     local previous = package.loaded.snacks
     local called = false
@@ -93,6 +106,8 @@ describe("comment composer", function()
     assert.equals(composer.body_win, vim.api.nvim_get_current_win())
     assert.equals("", composer_text(composer))
     assert.truthy(status_text(composer):find("Tab switch panels", 1, true))
+    assert.truthy(status_text(composer):find("<leader><Space> voice", 1, true))
+    assert.truthy(status_text(composer):find("<leader>d delete", 1, true))
     assert.truthy(status_text(composer):find("Voice: unavailable", 1, true))
     assert.truthy(refs_text(composer):find("x.lua:1-1", 1, true))
     vim.api.nvim_buf_set_lines(composer.body_buf, 0, -1, false, { "body" })
@@ -196,6 +211,119 @@ describe("comment composer", function()
     code_review.quit()
   end)
 
+  it("deletes an existing comment from the composer after confirmation", function()
+    local code_review, _actions, state, model = start_project()
+    local review = model.find_review(state.get().store, state.get().active_review_id)
+    local comment = model.new_comment("2026-05-18T00:00:01Z")
+    comment.body = "body"
+    table.insert(comment.file_references, model.new_file_reference({
+      relative_path = "x.lua",
+      start_line = 1,
+      end_line = 1,
+      selected_lines_snapshot = { "one" },
+    }))
+    table.insert(review.comments, comment)
+    require("code-review.composer").open_edit(comment)
+
+    local old_select = vim.ui.select
+    vim.ui.select = function(items, opts, cb)
+      assert.same({ "Delete", "Cancel" }, items)
+      assert.equals("Delete Comment?", opts.prompt)
+      cb("Delete")
+    end
+    require("code-review.composer").delete_comment_or_draft()
+    vim.ui.select = old_select
+
+    assert.equals(0, #review.comments)
+    assert.equals("comment_list", state.mode())
+    assert.equals(nil, state.get().composer)
+    code_review.quit()
+  end)
+
+  it("keeps an existing comment open when composer delete is cancelled", function()
+    local code_review, _actions, state, model = start_project()
+    local review = model.find_review(state.get().store, state.get().active_review_id)
+    local comment = model.new_comment("2026-05-18T00:00:01Z")
+    comment.body = "body"
+    table.insert(comment.file_references, model.new_file_reference({
+      relative_path = "x.lua",
+      start_line = 1,
+      end_line = 1,
+      selected_lines_snapshot = { "one" },
+    }))
+    table.insert(review.comments, comment)
+    require("code-review.composer").open_edit(comment)
+
+    local old_select = vim.ui.select
+    vim.ui.select = function(_, opts, cb)
+      assert.equals("Delete Comment?", opts.prompt)
+      cb("Cancel")
+    end
+    require("code-review.composer").delete_comment_or_draft()
+    vim.ui.select = old_select
+
+    assert.equals(1, #review.comments)
+    assert.equals("composer", state.mode())
+    assert.truthy(state.get().composer)
+    require("code-review.composer").cancel()
+    code_review.quit()
+  end)
+
+  it("deletes a new draft from the composer after confirmation", function()
+    local code_review, actions, state, model = start_project()
+    select_lines(actions, 1, 1)
+    local review = model.find_review(state.get().store, state.get().active_review_id)
+
+    local old_select = vim.ui.select
+    vim.ui.select = function(items, opts, cb)
+      assert.same({ "Delete", "Cancel" }, items)
+      assert.equals("Delete Draft?", opts.prompt)
+      cb("Delete")
+    end
+    require("code-review.composer").delete_comment_or_draft()
+    vim.ui.select = old_select
+
+    assert.equals(0, #review.comments)
+    assert.equals("comment_list", state.mode())
+    assert.equals(nil, state.get().composer)
+    code_review.quit()
+  end)
+
+  it("maps context-sensitive composer keys without overriding plain delete or space", function()
+    local code_review, actions, state = start_project()
+    select_lines(actions, 1, 1)
+    local composer = state.get().composer
+    assert.is_true(has_normal_map(composer.body_buf, "<Leader>d"))
+    assert.is_true(has_normal_map(composer.refs_buf, "<Leader>d"))
+    assert.is_true(has_normal_map(composer.body_buf, "<Leader><Space>"))
+    assert.is_true(has_normal_map(composer.refs_buf, "<Leader><Space>"))
+    assert.is_false(has_normal_map(composer.body_buf, "<Space>"))
+    assert.is_false(has_normal_map(composer.refs_buf, "<Space>"))
+    assert.is_false(has_normal_map(composer.body_buf, "d"))
+    assert.is_false(has_normal_map(composer.refs_buf, "d"))
+    require("code-review.composer").cancel()
+    code_review.quit()
+  end)
+
+  it("maps leader delete in the comment body to delete the whole draft", function()
+    local code_review, actions, state, model = start_project()
+    select_lines(actions, 1, 1)
+    local composer = state.get().composer
+    local review = model.find_review(state.get().store, state.get().active_review_id)
+    local old_select = vim.ui.select
+    vim.ui.select = function(items, opts, cb)
+      assert.same({ "Delete", "Cancel" }, items)
+      assert.equals("Delete Draft?", opts.prompt)
+      cb("Delete")
+    end
+    get_normal_map(composer.body_buf, "<Leader>d").callback()
+    vim.ui.select = old_select
+    assert.equals(0, #review.comments)
+    assert.equals("comment_list", state.mode())
+    assert.equals(nil, state.get().composer)
+    code_review.quit()
+  end)
+
   it("opens compact composer help and maps q and escape to close it", function()
     local code_review, actions, state = start_project()
     select_lines(actions, 1, 1)
@@ -205,6 +333,9 @@ describe("comment composer", function()
     local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
     assert.truthy(text:find("code-review.nvim - Composer Help", 1, true))
     assert.truthy(text:find("Open a picker with Delete and Go to", 1, true))
+    assert.truthy(text:find("<leader>d   Delete the focused reference after confirmation", 1, true))
+    assert.truthy(text:find("<leader>d   Delete the comment or draft after confirmation", 1, true))
+    assert.truthy(text:find("<leader><Space> Start, stop, or retry voice recording", 1, true))
     assert.truthy(text:find("Start, stop, or retry voice recording", 1, true))
     local maps = vim.api.nvim_buf_get_keymap(buf, "n")
     local seen_q, seen_esc = false, false
@@ -261,7 +392,7 @@ describe("comment composer", function()
     code_review.quit()
   end)
 
-  it("deletes draft references from reference rows only after confirmation", function()
+  it("maps leader delete in references to delete the focused File Reference", function()
     local code_review, actions, state = start_project()
     select_lines(actions, 1, 1)
     local composer = state.get().composer
@@ -271,7 +402,7 @@ describe("comment composer", function()
     vim.ui.select = function(_, _, cb)
       cb("Delete")
     end
-    require("code-review.composer").delete_reference_under_cursor()
+    get_normal_map(composer.refs_buf, "<Leader>d").callback()
     vim.ui.select = old_select
     assert.equals(0, #composer.references)
     require("code-review.composer").submit()
@@ -364,16 +495,16 @@ describe("comment composer", function()
     end
     require("code-review.voice").toggle()
     assert.truthy(record_opts)
-    assert.truthy(status_text(composer):find("Recording: press Space to stop", 1, true))
+    assert.truthy(status_text(composer):find("Recording: press <leader><Space> to stop", 1, true))
     require("code-review.voice").toggle()
     assert.truthy(transcribe_opts)
     assert.truthy(status_text(composer):find("Transcribing audio...", 1, true))
     transcribe_opts.on_exit(1, { ok = false, code = "network_error", message = "temporary", retryable = true }, "")
     assert.equals("voice_error_pending", state.mode())
-    assert.truthy(status_text(composer):find("Voice failed: press Space to retry", 1, true))
+    assert.truthy(status_text(composer):find("Voice failed: press <leader><Space> to retry", 1, true))
     require("code-review.voice").discard()
     assert.equals("composer", state.mode())
-    assert.truthy(status_text(composer):find("Voice ready: press Space to record", 1, true))
+    assert.truthy(status_text(composer):find("Voice ready: press <leader><Space> to record", 1, true))
     process.record = old_record
     process.transcribe = old_transcribe
     require("code-review.composer").cancel()

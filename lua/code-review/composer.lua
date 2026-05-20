@@ -61,18 +61,18 @@ end
 local function voice_status_line()
   local s = state.get()
   if s.mode == "recording" then
-    return "Recording: press Space to stop"
+    return "Recording: press <leader><Space> to stop"
   end
   if s.mode == "transcribing" then
     return "Transcribing audio..."
   end
   if s.mode == "voice_error_pending" then
-    return "Voice failed: press Space to retry"
+    return "Voice failed: press <leader><Space> to retry"
   end
   if not voice_available() then
     return "Voice: unavailable"
   end
-  return "Voice ready: press Space to record"
+  return "Voice ready: press <leader><Space> to record"
 end
 
 local function refresh_draft_highlights()
@@ -101,7 +101,7 @@ end
 
 local function status_lines(composer)
   return {
-    "Enter submit | q cancel | Space voice | Tab switch panels | ? help",
+    "Enter submit | <leader><Space> voice | <leader>d delete | q cancel | Tab switch panels | ? help",
     voice_status_line(),
   }
 end
@@ -197,6 +197,39 @@ local function persist()
   require("code-review.highlights").refresh_all()
 end
 
+local function confirm_delete_comment_or_draft()
+  local composer = state.get().composer
+  if not composer then
+    return
+  end
+  local review = active_review()
+  local target_comment_id = composer.target_comment_id
+  local prompt = target_comment_id and "Delete Comment?" or "Delete Draft?"
+  vim.ui.select({ "Delete", "Cancel" }, { prompt = prompt }, function(choice)
+    if choice ~= "Delete" then
+      return
+    end
+    if not target_comment_id then
+      clear_composer(true)
+      return
+    end
+    if not review then
+      notify.warn("Create or select a Review first.")
+      return
+    end
+    for index, comment in ipairs(review.comments or {}) do
+      if comment.id == target_comment_id then
+        table.remove(review.comments, index)
+        model.touch_review(review)
+        clear_composer(true)
+        persist()
+        return
+      end
+    end
+    notify.warn("Comment no longer exists.")
+  end)
+end
+
 local function confirm_delete_reference(index)
   local composer = state.get().composer
   if not composer or not index or not composer.references[index] then
@@ -244,7 +277,7 @@ local function reference_action()
 end
 
 local function apply_common_keymaps(buf)
-  vim.keymap.set("n", "<Space>", function()
+  vim.keymap.set("n", "<leader><Space>", function()
     require("code-review.voice").toggle()
   end, { buffer = buf, nowait = true, desc = "Toggle Code Review voice" })
   vim.keymap.set("n", "?", function()
@@ -260,6 +293,9 @@ end
 
 local function apply_body_keymaps(buf)
   apply_common_keymaps(buf)
+  vim.keymap.set("n", "<leader>d", function()
+    require("code-review.composer").delete_comment_or_draft()
+  end, { buffer = buf, nowait = true, desc = "Delete Code Review comment or draft" })
   vim.keymap.set("n", "<CR>", function()
     require("code-review.composer").submit()
   end, { buffer = buf, nowait = true, desc = "Submit Code Review comment" })
@@ -274,7 +310,7 @@ end
 local function apply_refs_keymaps(buf)
   apply_common_keymaps(buf)
   vim.keymap.set("n", "<CR>", reference_action, { buffer = buf, nowait = true, desc = "Open File Reference actions" })
-  vim.keymap.set("n", "d", function()
+  vim.keymap.set("n", "<leader>d", function()
     confirm_delete_reference(current_ref_index(state.get().composer))
   end, { buffer = buf, nowait = true, desc = "Delete draft File Reference" })
   vim.keymap.set("n", "q", function()
@@ -410,6 +446,10 @@ function M.reference_action()
   reference_action()
 end
 
+function M.delete_comment_or_draft()
+  confirm_delete_comment_or_draft()
+end
+
 function M.show_help()
   return ui.open_composer_help({
     "code-review.nvim - Composer Help",
@@ -421,20 +461,21 @@ function M.show_help()
     "",
     "References",
     "  Key          Action",
+    "  <leader>d   Delete the focused reference after confirmation",
     "  Enter        Open a picker with Delete and Go to",
-    "  d            Delete the focused reference after confirmation",
     "",
     "Comment text",
     "  Key          Action",
     "  Enter        Submit the comment",
-    "  Space        Start, stop, or retry voice recording",
+    "  <leader><Space> Start, stop, or retry voice recording",
+    "  <leader>d   Delete the comment or draft after confirmation",
     "  q or Esc     Cancel the composer from Normal mode",
     "  ?            Show help",
     "",
     "Voice states",
-    "  Recording     Press Space to stop recording",
+    "  Recording     Press <leader><Space> to stop recording",
     "  Transcribing  Wait for text to be inserted at the cursor",
-    "  Failed        Press Space to retry, or cancel to discard the draft",
+    "  Failed        Press <leader><Space> to retry, or cancel to discard the draft",
   })
 end
 
