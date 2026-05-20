@@ -96,7 +96,7 @@ local function sidebar_help_lines()
     add_key_line(lines, configured_key("edit_comment_under_cursor"), "Open the comment on the current line")
     lines[#lines + 1] = "                If more than one comment matches, choose from the picker"
     add_key_line(lines, configured_key("preview"), "Preview the current review in a throwaway buffer")
-    add_key_line(lines, configured_key("quit"), "Quit Code Review")
+    add_key_line(lines, configured_key("toggle"), "Toggle Code Review")
   else
     lines[#lines + 1] = "  Default keymaps are disabled by configuration"
   end

@@ -13,7 +13,7 @@ local actions = {
   edit_comment = { mode = "n", plug = "<Plug>(code-review-edit-comment)", desc = "Comment picker" },
   edit_comment_under_cursor = { mode = "n", plug = "<Plug>(code-review-edit-comment-under-cursor)", desc = "Edit comment under cursor" },
   preview = { mode = "n", plug = "<Plug>(code-review-preview)", desc = "Preview" },
-  quit = { mode = "n", plug = "<Plug>(code-review-quit)", desc = "Quit Review Mode" },
+  toggle = { mode = "n", plug = "<Plug>(code-review-toggle)", desc = "Toggle Review Mode" },
 }
 
 local function dispatch(action)

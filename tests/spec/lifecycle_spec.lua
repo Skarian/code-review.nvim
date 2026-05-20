@@ -14,6 +14,28 @@ describe("lifecycle and keymaps", function()
     assert_mapped("<leader>rR", "n")
     assert_mapped("<leader>ra", "n")
     assert_mapped("<leader>ra", "x")
+    assert_mapped("<leader>rt", "n")
+    assert.equals("", vim.fn.maparg("<leader>rq", "n"))
+  end)
+
+  it("toggles Review Mode through the default child action", function()
+    local code_review = require("code-review")
+    local actions = require("code-review.actions")
+    local review_picker = require("code-review.review_picker")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    code_review.setup({ storage = { dir = project .. "/store" }, keymaps = { prefix = "<leader>r" } })
+    vim.cmd.edit(project .. "/x.lua")
+
+    local old_open = review_picker.open
+    review_picker.open = function() end
+    actions.dispatch("toggle")
+    assert.is_true(code_review.is_active())
+
+    actions.dispatch("toggle")
+    review_picker.open = old_open
+    assert.is_false(code_review.is_active())
   end)
 
   it("guards visual reference mappings in normal mode", function()

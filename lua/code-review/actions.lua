@@ -327,6 +327,10 @@ function M.quit()
   require("code-review").quit()
 end
 
+function M.toggle()
+  require("code-review").toggle()
+end
+
 function M.dispatch(action)
   if M[action] then
     return M[action]()

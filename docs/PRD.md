@@ -169,7 +169,7 @@ Default configuration:
     append_reference = "r",
     edit_comment = "c",
     preview = "p",
-    quit = "q",
+    toggle = "t",
   },
   storage = {
     dir = nil,
@@ -221,7 +221,7 @@ Default action mappings:
 | `<leader>rc` | Normal | Open the Comment picker for edit, delete, or jump actions. |
 | `<leader>rR` | Normal | Open Review picker. If Review Mode is inactive, start it first. |
 | `<leader>rp` | Normal | Open preview. |
-| `<leader>rq` | Normal | Exit Review Mode. |
+| `<leader>rt` | Normal | Toggle Review Mode. |
 
 Rules:
 

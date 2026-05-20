@@ -14,7 +14,7 @@ M.defaults = {
     edit_comment = "c",
     edit_comment_under_cursor = "o",
     preview = "p",
-    quit = "q",
+    toggle = "t",
   },
   storage = {
     dir = nil,
