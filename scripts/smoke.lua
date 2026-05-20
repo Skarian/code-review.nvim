@@ -103,7 +103,7 @@ assert(s.composer and #s.composer.references == 1, "visual File Reference draft 
 
 actions.preview()
 assert(state.mode() ~= "preview", "preview should be blocked while the composer is open")
-assert_contains(last_notification(), "composer", "missing composer notification")
+assert_contains(last_notification(), "Comment Editor", "missing Comment Editor notification")
 
 vim.api.nvim_buf_set_lines(state.get().composer.body_buf, 0, -1, false, { "Check this calculation." })
 require("code-review.composer").submit()

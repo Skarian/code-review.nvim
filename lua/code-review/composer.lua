@@ -300,13 +300,13 @@ local function apply_common_keymaps(buf)
   end, { buffer = buf, nowait = true, desc = "Toggle Code Review voice" })
   vim.keymap.set("n", "?", function()
     require("code-review.composer").show_help()
-  end, { buffer = buf, nowait = true, desc = "Show Code Review composer help" })
+  end, { buffer = buf, nowait = true, desc = "Show Code Review Comment Editor help" })
   vim.keymap.set("n", "<Tab>", function()
     cycle_focus(false)
-  end, { buffer = buf, nowait = true, desc = "Next Code Review composer section" })
+  end, { buffer = buf, nowait = true, desc = "Next Code Review Comment Editor section" })
   vim.keymap.set("n", "<S-Tab>", function()
     cycle_focus(true)
-  end, { buffer = buf, nowait = true, desc = "Previous Code Review composer section" })
+  end, { buffer = buf, nowait = true, desc = "Previous Code Review Comment Editor section" })
 end
 
 local function apply_body_keymaps(buf)
@@ -344,7 +344,7 @@ end
 local function open(opts)
   local s = state.get()
   if s.composer then
-    notify.warn("Submit or cancel the comment composer first.")
+    notify.warn("Submit or cancel the Comment Editor first.")
     return
   end
   local source_win = vim.api.nvim_get_current_win()

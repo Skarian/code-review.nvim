@@ -43,7 +43,7 @@ function M.toggle()
   end
   local composer = s.composer
   if not composer then
-    notify.warn("Open a comment composer before using voice.")
+    notify.warn("Open the Comment Editor before using voice.")
     return
   end
   local review = require("code-review.model").find_review(s.store, s.active_review_id)

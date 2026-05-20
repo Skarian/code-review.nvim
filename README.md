@@ -72,16 +72,16 @@ By default, `<leader>r` is only a parent namespace for which-key and child mappi
 
 | Mapping | Action |
 | --- | --- |
-| `<leader>ra` | From Visual mode, create a new Comment from the selected lines and open the composer. |
+| `<leader>ra` | From Visual mode, create a new Comment from the selected lines and open the Comment Editor. |
 | `<leader>rr` | From Visual mode, append the selected lines to an existing Comment through the Comment picker. |
-| `<leader>re` | Open the Comment picker for edit, delete, or jump actions. |
+| `<leader>rc` | Open the Comment picker for edit, delete, or jump actions. |
 | `<leader>rR` | Start Review Mode if needed, then open the Review picker. |
 | `<leader>rp` | Open preview. |
 | `<leader>rq` | Exit Review Mode. |
 
-The Comment composer is a stacked floating layout with a read-only status panel, a focusable read-only File References panel, and an editable comment buffer. Initial focus goes to the comment buffer, which contains only the comment body and uses normal Vim editing. `<Tab>` and `<S-Tab>` move between references and the comment body. Normal `<CR>` submits from the comment buffer; `<CR>` on a reference opens Delete / Go to actions; `d` on a reference confirms deletion. Normal `<Space>` starts or stops voice recording inside the composer; Insert-mode Space remains normal text. Normal `?` opens compact composer help.
+The Comment Editor is a stacked floating layout with a read-only status panel, a focusable read-only File References panel, and an editable comment buffer. Initial focus goes to the comment buffer, which contains only the comment body and uses normal Vim editing. `<Tab>` and `<S-Tab>` move between references and the comment body. Normal `<CR>` submits from the comment buffer; `<CR>` on a reference opens Delete / Go to actions; `<leader>d` deletes the whole comment or draft from the comment buffer and deletes the focused File Reference from the references panel. Normal `<leader><Space>` starts, stops, or retries voice dictation. Normal `?` opens Comment Editor help.
 
-New Comments are persisted only after submit succeeds. Submit requires at least one File Reference and non-empty body text. Canceling a new composer creates nothing.
+New Comments are persisted only after submit succeeds. Submit requires at least one File Reference and non-empty body text. Canceling a new Comment Editor creates nothing.
 
 Configure or disable mappings:
 

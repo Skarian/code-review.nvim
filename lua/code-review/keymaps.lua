@@ -10,7 +10,7 @@ local actions = {
   review_picker = { mode = "n", plug = "<Plug>(code-review-review-picker)", desc = "Review picker" },
   add_reference = { mode = "x", plug = "<Plug>(code-review-add-reference)", desc = "New comment from selection" },
   append_reference = { mode = "x", plug = "<Plug>(code-review-append-reference)", desc = "Append selection to comment" },
-  edit_comment = { mode = "n", plug = "<Plug>(code-review-edit-comment)", desc = "Edit comments" },
+  edit_comment = { mode = "n", plug = "<Plug>(code-review-edit-comment)", desc = "Comment picker" },
   edit_comment_under_cursor = { mode = "n", plug = "<Plug>(code-review-edit-comment-under-cursor)", desc = "Edit comment under cursor" },
   preview = { mode = "n", plug = "<Plug>(code-review-preview)", desc = "Preview" },
   quit = { mode = "n", plug = "<Plug>(code-review-quit)", desc = "Quit Review Mode" },

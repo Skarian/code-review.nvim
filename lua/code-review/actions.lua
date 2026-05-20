@@ -23,7 +23,7 @@ end
 local function blocked_by_editor_or_voice()
   local mode = state.mode()
   if mode == "composer" then
-    notify.warn("Submit or cancel the comment composer first.")
+    notify.warn("Submit or cancel the Comment Editor first.")
     return true
   end
   if mode == "recording" or mode == "transcribing" or mode == "voice_error_pending" then
