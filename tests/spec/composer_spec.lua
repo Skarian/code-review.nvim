@@ -118,6 +118,59 @@ describe("comment composer", function()
     code_review.quit()
   end)
 
+  it("shows all sidebar comments after a successful submit until source filtering resumes", function()
+    local code_review, actions, state, model = start_project({ "one", "two", "three", "four" })
+    local sidebar = require("code-review.sidebar")
+    local source_buf = vim.api.nvim_get_current_buf()
+    local source_win = vim.api.nvim_get_current_win()
+    local review = model.find_review(state.get().store, state.get().active_review_id)
+    local existing = model.new_comment("2026-05-18T00:00:01Z")
+    existing.body = "existing"
+    table.insert(existing.file_references, model.new_file_reference({
+      relative_path = "x.lua",
+      start_line = 2,
+      end_line = 2,
+      selected_lines_snapshot = { "two" },
+    }))
+    local other = model.new_comment("2026-05-18T00:00:02Z")
+    other.body = "other"
+    table.insert(other.file_references, model.new_file_reference({
+      relative_path = "x.lua",
+      start_line = 4,
+      end_line = 4,
+      selected_lines_snapshot = { "four" },
+    }))
+    review.comments = { existing, other }
+    vim.api.nvim_win_set_cursor(source_win, { 2, 0 })
+    sidebar.update_filter_for_buffer(source_buf)
+    assert.truthy(state.get().sidebar.filter)
+
+    select_lines(actions, 2, 2)
+    vim.api.nvim_buf_set_lines(state.get().composer.body_buf, 0, -1, false, { "new" })
+    require("code-review.composer").submit()
+
+    local lines = table.concat(vim.api.nvim_buf_get_lines(state.get().sidebar.buf, 0, -1, false), "\n")
+    assert.equals(nil, state.get().sidebar.filter)
+    assert.truthy(lines:find("new", 1, true))
+    assert.truthy(lines:find("existing", 1, true))
+    assert.truthy(lines:find("other", 1, true))
+
+    sidebar.update_filter_for_buffer(source_buf)
+    lines = table.concat(vim.api.nvim_buf_get_lines(state.get().sidebar.buf, 0, -1, false), "\n")
+    assert.equals(nil, state.get().sidebar.filter)
+    assert.truthy(lines:find("new", 1, true))
+    assert.truthy(lines:find("existing", 1, true))
+    assert.truthy(lines:find("other", 1, true))
+
+    sidebar.update_filter_for_buffer(source_buf)
+    lines = table.concat(vim.api.nvim_buf_get_lines(state.get().sidebar.buf, 0, -1, false), "\n")
+    assert.truthy(state.get().sidebar.filter)
+    assert.truthy(lines:find("new", 1, true))
+    assert.truthy(lines:find("existing", 1, true))
+    assert.falsy(lines:find("other", 1, true))
+    code_review.quit()
+  end)
+
   it("opens existing comments in normal mode at the end of the body", function()
     local code_review, _actions, state, model = start_project()
     local review = model.find_review(state.get().store, state.get().active_review_id)

@@ -452,6 +452,17 @@ function M.clear_filter()
   set_filter(nil)
 end
 
+function M.suppress_next_source_filter()
+  local s = state.get()
+  if stale_sidebar(s.sidebar) then
+    s.sidebar = nil
+  end
+  if s.sidebar then
+    s.sidebar.suppress_next_source_filter = true
+  end
+  M.clear_filter()
+end
+
 function M.update_filter_for_buffer(bufnr)
   if not state.is_active() then
     return
@@ -475,6 +486,11 @@ function M.update_filter_for_buffer(bufnr)
   end
   local review = model.find_review(s.store, s.active_review_id)
   if not review then
+    M.clear_filter()
+    return
+  end
+  if s.sidebar and s.sidebar.suppress_next_source_filter then
+    s.sidebar.suppress_next_source_filter = false
     M.clear_filter()
     return
   end

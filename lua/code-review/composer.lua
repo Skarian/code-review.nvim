@@ -385,6 +385,7 @@ function M.submit()
   comment.body = body
   comment.file_references = vim.deepcopy(composer.references)
   model.touch_comment(review, comment)
+  require("code-review.sidebar").suppress_next_source_filter()
   clear_composer(true)
   persist()
 end
