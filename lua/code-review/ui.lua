@@ -199,11 +199,11 @@ end
 
 function M.open_composer_help(lines)
   return M.open_help({
-    name = "Code Review Composer Help",
-    title = " Code Review Composer Help ",
+    name = "Code Review Comment Editor Help",
+    title = " code-review.nvim - Comment Editor Help ",
     lines = lines,
-    width = math.min(72, math.max(48, math.floor(vim.o.columns * 0.5))),
-    height = math.min(#lines + 2, math.max(8, math.floor(vim.o.lines * 0.35))),
+    width = math.min(104, math.max(72, math.floor(vim.o.columns * 0.72))),
+    height = math.min(#lines + 2, math.max(14, math.floor(vim.o.lines * 0.62))),
   })
 end
 
