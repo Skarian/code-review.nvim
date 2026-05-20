@@ -297,10 +297,23 @@ describe("comment composer", function()
     assert.is_true(has_normal_map(composer.refs_buf, "<Leader>d"))
     assert.is_true(has_normal_map(composer.body_buf, "<Leader><Space>"))
     assert.is_true(has_normal_map(composer.refs_buf, "<Leader><Space>"))
+    assert.is_true(has_normal_map(composer.status_buf, "<Leader><Space>"))
+    assert.is_true(has_normal_map(composer.body_buf, "q"))
+    assert.is_true(has_normal_map(composer.refs_buf, "q"))
+    assert.is_true(has_normal_map(composer.status_buf, "q"))
+    assert.is_true(has_normal_map(composer.body_buf, "<Esc>"))
+    assert.is_true(has_normal_map(composer.refs_buf, "<Esc>"))
+    assert.is_true(has_normal_map(composer.status_buf, "<Esc>"))
+    assert.is_true(has_normal_map(composer.body_buf, "<Leader>q"))
+    assert.is_true(has_normal_map(composer.refs_buf, "<Leader>q"))
+    assert.is_true(has_normal_map(composer.status_buf, "<Leader>q"))
     assert.is_false(has_normal_map(composer.body_buf, "<Space>"))
     assert.is_false(has_normal_map(composer.refs_buf, "<Space>"))
+    assert.is_false(has_normal_map(composer.status_buf, "<Space>"))
     assert.is_false(has_normal_map(composer.body_buf, "d"))
     assert.is_false(has_normal_map(composer.refs_buf, "d"))
+    assert.is_false(has_normal_map(composer.status_buf, "d"))
+    assert.is_false(has_normal_map(composer.status_buf, "<Leader>d"))
     require("code-review.composer").cancel()
     code_review.quit()
   end)
@@ -321,6 +334,50 @@ describe("comment composer", function()
     assert.equals(0, #review.comments)
     assert.equals("comment_list", state.mode())
     assert.equals(nil, state.get().composer)
+    code_review.quit()
+  end)
+
+  it("maps common quit keys on every composer pane to cancel the whole composer", function()
+    for _, lhs in ipairs({ "q", "<Leader>q", "<Esc>" }) do
+      for _, pane in ipairs({ "body_buf", "refs_buf", "status_buf" }) do
+        local code_review, actions, state = start_project()
+        select_lines(actions, 1, 1)
+        local composer = state.get().composer
+        get_normal_map(composer[pane], lhs).callback()
+        assert.equals("comment_list", state.mode())
+        assert.equals(nil, state.get().composer)
+        assert.is_false(vim.api.nvim_buf_is_valid(composer.body_buf))
+        assert.is_false(vim.api.nvim_buf_is_valid(composer.refs_buf))
+        assert.is_false(vim.api.nvim_buf_is_valid(composer.status_buf))
+        code_review.quit()
+      end
+    end
+  end)
+
+  it("keeps global leader quit from closing only the focused reference pane", function()
+    local old_map = vim.fn.maparg("<leader>q", "n", false, true)
+    if old_map and old_map.lhs then
+      pcall(vim.keymap.del, "n", "<leader>q")
+    end
+    vim.keymap.set("n", "<leader>q", "<cmd>close<cr>", { desc = "User close mapping" })
+
+    local code_review, actions, state = start_project()
+    select_lines(actions, 1, 1)
+    local composer = state.get().composer
+    require("code-review.composer").focus_references()
+    vim.cmd("stopinsert")
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<leader>q", true, false, true), "xt", false)
+    vim.cmd("redraw")
+
+    pcall(vim.keymap.del, "n", "<leader>q")
+    if old_map and old_map.lhs then
+      vim.fn.mapset("n", false, old_map)
+    end
+
+    assert.equals("comment_list", state.mode())
+    assert.equals(nil, state.get().composer)
+    assert.is_false(vim.api.nvim_win_is_valid(composer.refs_win))
+    assert.is_false(vim.api.nvim_win_is_valid(composer.body_win))
     code_review.quit()
   end)
 
@@ -402,6 +459,7 @@ describe("comment composer", function()
     select_lines(actions, 1, 1)
     local composer = state.get().composer
     assert.equals(composer.body_win, vim.api.nvim_get_current_win())
+    assert.is_true(vim.api.nvim_win_get_config(composer.status_win).focusable)
     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Tab>", true, false, true), "x", false)
     assert.equals(composer.refs_win, vim.api.nvim_get_current_win())
     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Tab>", true, false, true), "x", false)

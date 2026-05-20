@@ -105,7 +105,7 @@ function M.open_composer_stack(body_lines)
     width = width,
     height = status_height,
     title = " Code Review ",
-    focusable = false,
+    focusable = true,
   })
   local refs_win = open_float(refs_buf, {
     row = row + status_height + gap,
