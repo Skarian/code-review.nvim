@@ -149,6 +149,10 @@ local function capture_reference()
     notify.warn("Write the buffer before adding a File Reference.")
     return nil
   end
+  if not navigation.source_buf_for_root(s.root, bufnr) then
+    notify.warn("Open a file buffer inside the active Review root first.")
+    return nil
+  end
   local rel = path.relative(s.root, vim.api.nvim_buf_get_name(bufnr))
   if not rel then
     notify.warn("File is outside the active Review root.")

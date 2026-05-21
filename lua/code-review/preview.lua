@@ -38,6 +38,10 @@ local function preview_window(buf)
   return nil
 end
 
+local function preview_visible(buf)
+  return preview_window(buf) ~= nil
+end
+
 local function origin_buffer(preview)
   if valid_buf(preview.origin_buf) then
     return preview.origin_buf
@@ -74,9 +78,12 @@ local function restore_view(preview, win)
   end
 end
 
-local function restore_after_raw_close(preview)
+local function restore_after_preview_closed(preview)
   local state = require("code-review.state")
   local s = state.get()
+  if s.preview ~= preview then
+    return
+  end
   if not s.active or s.tearing_down then
     s.preview_restoring = false
     return
@@ -109,6 +116,25 @@ local function restore_after_raw_close(preview)
   end
 end
 
+local function schedule_restore_if_preview_hidden(preview)
+  vim.schedule(function()
+    local state = require("code-review.state")
+    local s = state.get()
+    if not s.active or s.tearing_down or s.preview ~= preview or preview.closing then
+      return
+    end
+    if valid_buf(preview.buf) and preview_visible(preview.buf) then
+      return
+    end
+    s.preview_restoring = true
+    restore_after_preview_closed(preview)
+  end)
+end
+
+function M.handle_window_closed(preview)
+  schedule_restore_if_preview_hidden(preview)
+end
+
 function M.rollback_quit_attempt(preview, session_id, attempt_id)
   local state = require("code-review.state")
   local s = state.get()
@@ -121,6 +147,9 @@ function M.rollback_quit_attempt(preview, session_id, attempt_id)
     or preview.quit_attempt_id ~= attempt_id
     or not valid_buf(preview.buf)
   then
+    return
+  end
+  if not preview_visible(preview.buf) then
     return
   end
   local survivor = preview.survivor_win
@@ -225,6 +254,7 @@ function M.open(text, previous)
     set_preview_lines(s.preview.buf, text)
     local win = preview_window(s.preview.buf)
     if win then
+      s.preview.win = win
       vim.api.nvim_set_current_win(win)
     else
       local target = navigation.find_preview_target_window(s.root)
@@ -237,6 +267,7 @@ function M.open(text, previous)
       end
       vim.api.nvim_set_current_win(target)
       vim.api.nvim_win_set_buf(target, s.preview.buf)
+      s.preview.win = target
     end
     return s.preview.buf
   end
@@ -246,18 +277,18 @@ function M.open(text, previous)
     return nil
   end
   local origin = capture_origin(target_win, previous)
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.bo[buf].buftype = "nofile"
+  local buf = vim.api.nvim_create_buf(true, false)
+  vim.bo[buf].buftype = ""
   vim.bo[buf].buflisted = true
-  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].bufhidden = "unload"
   vim.bo[buf].filetype = "code-review-preview"
   vim.bo[buf].swapfile = false
-  pcall(vim.api.nvim_buf_set_name, buf, "Code Review Preview")
+  vim.b[buf].code_review_preview = true
   set_preview_lines(buf, text)
   s.preview = vim.tbl_extend("force", origin, {
     buf = buf,
   })
-  vim.api.nvim_create_autocmd("BufWipeout", {
+  vim.api.nvim_create_autocmd({ "BufUnload", "BufDelete", "BufWipeout" }, {
     buffer = buf,
     callback = function()
       local state = require("code-review.state")
@@ -267,7 +298,7 @@ function M.open(text, previous)
         if s.active and not preview.closing then
           s.preview_restoring = true
           vim.schedule(function()
-            restore_after_raw_close(preview)
+            restore_after_preview_closed(preview)
           end)
           return
         end
@@ -279,10 +310,21 @@ function M.open(text, previous)
       end
     end,
   })
+  vim.api.nvim_create_autocmd("BufWinLeave", {
+    buffer = buf,
+    callback = function()
+      local state = require("code-review.state")
+      local s = state.get()
+      if s.preview and s.preview.buf == buf then
+        schedule_restore_if_preview_hidden(s.preview)
+      end
+    end,
+  })
   if valid_win(target_win) and target_win ~= vim.api.nvim_get_current_win() then
     vim.api.nvim_set_current_win(target_win)
   end
   vim.api.nvim_win_set_buf(target_win, buf)
+  s.preview.win = target_win
   return buf
 end
 
@@ -290,10 +332,15 @@ function M.close()
   local state = require("code-review.state")
   local s = state.get()
   if s.preview and s.preview.buf and vim.api.nvim_buf_is_valid(s.preview.buf) then
+    if vim.bo[s.preview.buf].modified then
+      notify.warn("Write or discard the modified Code Review preview before quitting.")
+      return false
+    end
     s.preview.closing = true
     pcall(vim.api.nvim_buf_delete, s.preview.buf, { force = true })
   end
   s.preview = nil
+  return true
 end
 
 return M

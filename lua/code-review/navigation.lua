@@ -31,8 +31,16 @@ local function normal_named_file_buf(buf)
   return valid_buf(buf) and vim.bo[buf].buftype == "" and vim.api.nvim_buf_get_name(buf) ~= ""
 end
 
-local function preview_buf(buf)
-  return valid_buf(buf) and vim.bo[buf].filetype == "code-review-preview"
+function M.preview_buf(buf)
+  if not valid_buf(buf) then
+    return false
+  end
+  local s = state.get()
+  if s.preview and s.preview.buf == buf then
+    return true
+  end
+  local ok, marked = pcall(vim.api.nvim_buf_get_var, buf, "code_review_preview")
+  return (ok and marked == true) or vim.bo[buf].filetype == "code-review-preview"
 end
 
 function M.code_review_aux_window(win)
@@ -61,7 +69,7 @@ function M.aux_window(win)
     return false
   end
   local buf = vim.api.nvim_win_get_buf(win)
-  if preview_buf(buf) then
+  if M.preview_buf(buf) then
     return false
   end
   if M.code_review_aux_window(win) or M.neo_tree_window(win) then
@@ -74,7 +82,7 @@ function M.content_buf(buf)
   if not loaded_buf(buf) then
     return false
   end
-  if preview_buf(buf) then
+  if M.preview_buf(buf) then
     return true
   end
   return vim.bo[buf].buftype == ""
@@ -99,6 +107,9 @@ end
 
 function M.source_buf_for_root(root, buf)
   if not root or not valid_buf(buf) then
+    return false
+  end
+  if M.preview_buf(buf) then
     return false
   end
   local name = vim.api.nvim_buf_get_name(buf)
@@ -175,7 +186,7 @@ local function safe_preview_content_window(win)
     return false
   end
   local buf = vim.api.nvim_win_get_buf(win)
-  if preview_buf(buf) then
+  if M.preview_buf(buf) then
     return false
   end
   return not vim.bo[buf].modified

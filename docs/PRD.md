@@ -67,7 +67,7 @@ The workflow is code-buffer-first. The sidebar is a persistent overview and stat
 - **File Reference**: an exact linewise reference to one saved file inside the locked project root. It stores relative path, one-based inclusive start/end lines, and the selected line snapshot.
 - **Sidebar**: a persistent read-only right split shown while Review Mode is active.
 - **Comment Editor**: a stacked floating layout for creating or editing complete Comments. It owns draft body text, draft references, validation, and local voice state until submit or cancel.
-- **Preview**: an editable scratch buffer opened in the current window. It is regenerated from Review data and is never persisted by the plugin.
+- **Preview**: an editable unnamed normal buffer opened in the current window. It is regenerated from Review data and is never persisted by the plugin.
 - **Stale File Reference**: a File Reference whose file is missing, range is invalid for current contents, current lines differ from the snapshot, or the reference cannot be checked safely.
 
 ## Runtime requirements
@@ -582,7 +582,7 @@ Composer draft references should be highlighted while the composer is open and c
 
 ## Preview
 
-The preview action validates the active Review and opens an editable throwaway content buffer in a main editor window.
+The preview action validates the active Review and opens an editable unnamed normal buffer in a main editor window. Generated review text is inserted and marked clean.
 
 Buffer rules:
 
@@ -590,14 +590,14 @@ Buffer rules:
 - If no source window is visible, opens in a safe non-preview content window in the current tab.
 - Never replaces auxiliary panes such as sidebar, footer, neo-tree, or other plugin buffers. If no safe target exists, preview warns and does nothing.
 - Keeps Review Mode active and sidebar visible while the preview is open.
-- `buftype=nofile`, `buflisted=true`, `bufhidden=wipe`, `filetype=code-review-preview`, `swapfile=false`.
+- `buftype=""`, unnamed, `buflisted=true`, `bufhidden=unload`, `filetype=code-review-preview`, `modifiable=true`, `readonly=false`, and `modified=false` after preload.
 - Receives no Review Mode action mappings.
 - Receives no preview-local close mappings; user/global close-buffer mappings should continue to work.
 - Is editable.
-- Edits are scratch-only and never mutate Review data. Under the current `nofile` preview contract, edits are not protected by a modified-preview replacement prompt.
+- User edits make the preview buffer modified under normal Neovim rules. Saving the preview writes only that buffer's text and never mutates stored Review data.
 - Only one preview buffer exists per Review Mode session.
 
-Preview is a content buffer that keeps Review Mode alive, but it is not a source buffer. Source actions such as creating File References, refreshing source highlights, and source-line sidebar filtering still require named file buffers inside the locked root.
+Preview is a content buffer that keeps Review Mode alive, but it is not a source buffer. A saved preview remains a Code Review preview buffer and is not eligible for File References, even if saved inside the locked root. Source actions such as creating File References, refreshing source highlights, and source-line sidebar filtering still require named file buffers inside the locked root.
 
 Preview is blocked if:
 
@@ -617,8 +617,9 @@ Blocking notifications include counts when useful, for example:
 Re-running preview:
 
 - Refreshes the single preview buffer in place.
-- On Review Mode quit, force-wipes preview buffers without prompting.
-- Raw close paths such as `:bdelete` or `:confirm q` restore the origin content buffer when possible without replacing unrelated user content. If the origin cannot be restored and other content remains, Code Review leaves that content untouched, restores Review Mode state, and keeps the sidebar coherent.
+- If the existing preview has unsaved edits, replacement requires explicit confirmation.
+- Review Mode quit refuses to discard a modified preview buffer. It notifies the user to write or discard preview edits first.
+- Raw close paths such as `:bdelete`, `:confirm q`, or closing the preview window restore the origin content buffer when possible without replacing unrelated user content. If the origin cannot be restored and other content remains, Code Review leaves that content untouched, restores Review Mode state, and keeps the sidebar coherent.
 
 Format:
 

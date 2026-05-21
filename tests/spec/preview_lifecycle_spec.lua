@@ -172,23 +172,47 @@ describe("preview lifecycle", function()
     actions.preview()
     local preview_buf = state.get().preview.buf
     assert.truthy(vim.api.nvim_buf_is_valid(preview_buf))
-    assert.equals("nofile", vim.bo[preview_buf].buftype)
+    assert.equals("", vim.bo[preview_buf].buftype)
+    assert.equals("", vim.api.nvim_buf_get_name(preview_buf))
     assert.is_true(vim.bo[preview_buf].buflisted)
-    assert.equals("wipe", vim.bo[preview_buf].bufhidden)
+    assert.equals("unload", vim.bo[preview_buf].bufhidden)
     assert.equals("code-review-preview", vim.bo[preview_buf].filetype)
     assert.is_false(vim.bo[preview_buf].swapfile)
     assert.is_true(vim.bo[preview_buf].modifiable)
     assert.is_false(vim.bo[preview_buf].readonly)
+    assert.is_true(vim.b[preview_buf].code_review_preview)
+    assert.is_false(vim.bo[preview_buf].modified)
     assert.is_false(has_normal_map(preview_buf, "q"))
     assert.is_false(has_normal_map(preview_buf, "<leader>q"))
     assert.is_false(has_normal_map(preview_buf, "<leader>c"))
     vim.api.nvim_buf_set_lines(preview_buf, 0, 0, false, { "scratch edit" })
-    assert.is_false(vim.bo[preview_buf].modified)
+    assert.is_true(vim.bo[preview_buf].modified)
+    vim.bo[preview_buf].modified = false
     actions.preview()
     assert.equals("preview", state.mode())
     assert.equals(preview_buf, state.get().preview.buf)
     code_review.quit()
     assert.is_false(vim.api.nvim_buf_is_valid(preview_buf))
+  end)
+
+  it("keeps saved preview buffers out of source and reference actions", function()
+    local code_review, actions, state = make_complete_review()
+    local navigation = require("code-review.navigation")
+    local project = state.get().root
+    actions.preview()
+    local preview_buf = state.get().preview.buf
+    local saved = project .. "/preview-output.md"
+
+    vim.cmd("write " .. vim.fn.fnameescape(saved))
+
+    assert.equals(saved, vim.api.nvim_buf_get_name(preview_buf))
+    assert.is_true(navigation.content_buf(preview_buf))
+    assert.is_false(navigation.source_buf(preview_buf))
+    vim.fn.setpos("'<", { 0, 1, 1, 0 })
+    vim.fn.setpos("'>", { 0, 1, 1, 0 })
+    actions.add_reference()
+    assert.equals(nil, state.get().composer)
+    code_review.quit()
   end)
 
   it("keeps Review Mode active while preview is the only content window", function()
@@ -284,6 +308,47 @@ describe("preview lifecycle", function()
     assert.equals(outside_buf, vim.api.nvim_win_get_buf(outside_win))
     assert.equals(nil, win_for_buf(source_buf))
     assert.is_true(active_sidebar_visible(state))
+    code_review.quit()
+  end)
+
+  it("restores the source and sidebar after a clean preview window close unloads the buffer", function()
+    local code_review, actions, state, _, source_buf = make_complete_review()
+    actions.preview()
+    local preview_buf = state.get().preview.buf
+    assert.is_true(vim.api.nvim_buf_is_loaded(preview_buf))
+
+    vim.cmd.close()
+    vim.wait(300, function()
+      return state.mode() == "comment_list" and vim.api.nvim_get_current_buf() == source_buf and active_sidebar_visible(state)
+    end)
+
+    assert.is_true(state.is_active())
+    assert.equals("comment_list", state.mode())
+    assert.equals(source_buf, vim.api.nvim_get_current_buf())
+    assert.is_true(active_sidebar_visible(state))
+    assert.is_false(vim.api.nvim_buf_is_loaded(preview_buf))
+    code_review.quit()
+  end)
+
+  it("keeps modified preview visible when a window close would hide edits", function()
+    local code_review, actions, state = make_complete_review()
+    actions.preview()
+    local preview_buf = state.get().preview.buf
+    local preview_win = vim.api.nvim_get_current_win()
+    vim.api.nvim_buf_set_lines(preview_buf, -1, -1, false, { "user edit" })
+    assert.is_true(vim.bo[preview_buf].modified)
+
+    local ok = pcall(vim.cmd.close)
+    vim.wait(50, function()
+      return false
+    end)
+
+    assert.is_false(ok)
+    assert.is_true(vim.api.nvim_win_is_valid(preview_win))
+    assert.equals(preview_buf, vim.api.nvim_get_current_buf())
+    assert.is_true(vim.bo[preview_buf].modified)
+    assert.equals("preview", state.mode())
+    vim.bo[preview_buf].modified = false
     code_review.quit()
   end)
 
@@ -412,6 +477,31 @@ describe("preview lifecycle", function()
     assert.is_true(vim.api.nvim_buf_is_valid(preview.buf))
     assert.is_false(state.get().preview_restoring)
     assert.equals(before, #vim.api.nvim_tabpage_list_wins(0))
+    code_review.quit()
+  end)
+
+  it("refuses to quit Review Mode with a modified preview", function()
+    local code_review, actions, state = make_complete_review()
+    actions.preview()
+    local preview_buf = state.get().preview.buf
+    vim.api.nvim_buf_set_lines(preview_buf, -1, -1, false, { "user edit" })
+    assert.is_true(vim.bo[preview_buf].modified)
+    local old_notify = vim.notify
+    local messages = {}
+    vim.notify = function(message)
+      messages[#messages + 1] = message
+    end
+
+    local ok = code_review.quit()
+
+    vim.notify = old_notify
+    assert.equals(false, ok)
+    assert.is_true(state.is_active())
+    assert.equals("preview", state.mode())
+    assert.equals(preview_buf, vim.api.nvim_get_current_buf())
+    assert.is_true(vim.bo[preview_buf].modified)
+    assert.equals("Write or discard the modified Code Review preview before quitting.", messages[1])
+    vim.bo[preview_buf].modified = false
     code_review.quit()
   end)
 

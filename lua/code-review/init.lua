@@ -195,6 +195,9 @@ local function create_augroup()
         return
       end
       local closing = tonumber(args.match)
+      if current.preview and closing and current.preview.win == closing then
+        require("code-review.preview").handle_window_closed(current.preview)
+      end
       if
         closing
         and current.sidebar
@@ -339,6 +342,10 @@ function M.quit()
     return
   end
   local s = state.get()
+  if s.preview and s.preview.buf and vim.api.nvim_buf_is_valid(s.preview.buf) and vim.bo[s.preview.buf].modified then
+    notify.warn("Write or discard the modified Code Review preview before quitting.")
+    return false
+  end
   lifecycle_exit_scheduled = false
   s.tearing_down = true
   pcall(require("code-review.voice").stop)
@@ -348,7 +355,10 @@ function M.quit()
     s.augroup = nil
   end
   require("code-review.sidebar").close()
-  require("code-review.preview").close()
+  if require("code-review.preview").close() == false then
+    s.tearing_down = false
+    return false
+  end
   if s.composer then
     require("code-review.composer").close()
   end
@@ -359,6 +369,7 @@ function M.quit()
   end
   stop_sidebar_timer(s)
   state.deactivate()
+  return true
 end
 
 function M.toggle()
