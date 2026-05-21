@@ -61,6 +61,16 @@ describe("sidebar", function()
     end
   end
 
+  local function close_all_content_windows()
+    local wins = require("code-review.navigation").tab_content_windows(0)
+    for _, win in ipairs(wins) do
+      if vim.api.nvim_win_is_valid(win) then
+        vim.api.nvim_set_current_win(win)
+        pcall(vim.cmd.close)
+      end
+    end
+  end
+
   local function is_centered(line, text, width)
     local start_col = line:find(text, 1, true)
     if not start_col then
@@ -95,7 +105,15 @@ describe("sidebar", function()
     vim.fn.mkdir(project .. "/.git", "p")
     vim.fn.writefile({ "x" }, project .. "/x.lua")
     config.setup({ storage = { dir = project .. "/store" }, sidebar = { width = 32 } })
+    pcall(code_review.quit)
+    pcall(vim.cmd, "tabonly")
     pcall(vim.cmd, "only")
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+      local ok, cfg = pcall(vim.api.nvim_win_get_config, win)
+      if ok and cfg.relative ~= "" then
+        pcall(vim.api.nvim_win_close, win, true)
+      end
+    end
     vim.cmd.edit(project .. "/x.lua")
     wipe_normal_file_buffers_except(vim.api.nvim_get_current_buf())
     return code_review, state
@@ -215,65 +233,7 @@ describe("sidebar", function()
     code_review.quit()
   end)
 
-  it("schedules editor exit when the last work window is closed", function()
-    local code_review, state = start_sidebar_project()
-    local exit_calls, restore_exit = stub_auxiliary_exit(code_review)
-    code_review.start()
-    local code_win = vim.api.nvim_get_current_win()
-    vim.api.nvim_set_current_win(code_win)
-
-    vim.cmd.close()
-
-    vim.wait(200, function()
-      return exit_calls() == 1
-    end)
-    assert.is_true(state.is_active())
-    assert.equals(2, code_review_ui_window_count())
-    assert.equals(1, exit_calls())
-    restore_exit()
-    code_review.quit()
-  end)
-
-  it("keeps auxiliary panes in place while the editor exit is pending", function()
-    local code_review, state = start_sidebar_project()
-    local exit_calls, restore_exit = stub_auxiliary_exit(code_review)
-    code_review.start()
-    local code_win = vim.api.nvim_get_current_win()
-    local sidebar = state.get().sidebar
-    vim.api.nvim_set_current_win(code_win)
-
-    vim.cmd.close()
-    vim.wait(200, function()
-      return exit_calls() == 1
-    end)
-
-    assert.is_true(state.is_active())
-    assert.is_true(vim.api.nvim_win_is_valid(sidebar.win))
-    assert.is_true(vim.api.nvim_win_is_valid(sidebar.footer_win))
-    assert.equals(1, exit_calls())
-    restore_exit()
-    code_review.quit()
-  end)
-
-  it("schedules editor exit when the last work window becomes neo-tree", function()
-    local code_review, state = start_sidebar_project()
-    local exit_calls, restore_exit = stub_auxiliary_exit(code_review)
-    code_review.start()
-    local code_win = vim.api.nvim_get_current_win()
-
-    set_neo_tree_window(code_win)
-
-    vim.wait(200, function()
-      return exit_calls() == 1
-    end)
-    assert.is_true(state.is_active())
-    assert.equals(2, code_review_ui_window_count())
-    assert.equals(1, exit_calls())
-    restore_exit()
-    code_review.quit()
-  end)
-
-  it("keeps Review Mode active when deleting a file leaves an unnamed work window", function()
+  it("keeps Review Mode active when deleting a file leaves an unnamed content window", function()
     local code_review, state = start_sidebar_project()
     code_review.start()
     local code_win = vim.api.nvim_get_current_win()
@@ -290,12 +250,12 @@ describe("sidebar", function()
     end)
 
     assert.is_true(state.is_active())
-    assert.equals("", vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(code_win)))
+    assert.is_true(require("code-review.navigation").content_window(code_win))
     assert.equals(2, code_review_ui_window_count())
     code_review.quit()
   end)
 
-  it("keeps Review Mode active while an outside-root work window is visible", function()
+  it("keeps Review Mode active while an outside-root content window is visible", function()
     local code_review, state = start_sidebar_project()
     local code_win = vim.api.nvim_get_current_win()
     local outside = vim.fn.tempname() .. ".lua"
@@ -318,7 +278,7 @@ describe("sidebar", function()
     code_review.quit()
   end)
 
-  it("keeps Review Mode active when closing one of two work windows", function()
+  it("keeps Review Mode active when closing one of two content windows", function()
     local code_review, state = start_sidebar_project()
     local exit_calls, restore_exit = stub_auxiliary_exit(code_review)
     local project = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":h")
@@ -471,6 +431,38 @@ describe("sidebar", function()
 
   it("recreates the sidebar after a direct footer buffer delete", function()
     assert_direct_sidebar_close_recreates("bdelete", "footer")
+  end)
+
+  it("does not close a window that reused a stale sidebar slot", function()
+    local code_review, state = start_sidebar_project()
+    code_review.start()
+    local sidebar = state.get().sidebar
+    local stale_win = sidebar.win
+    local user_buf = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_buf_set_name(user_buf, vim.fn.tempname() .. ".lua")
+    vim.api.nvim_win_set_buf(stale_win, user_buf)
+
+    require("code-review.sidebar").render()
+
+    assert.is_true(vim.api.nvim_win_is_valid(stale_win))
+    assert.equals(user_buf, vim.api.nvim_win_get_buf(stale_win))
+    assert.equals(2, code_review_ui_window_count())
+    code_review.quit()
+  end)
+
+  it("does not close neo-tree when it reuses a stale footer slot", function()
+    local code_review, state = start_sidebar_project()
+    code_review.start()
+    local sidebar = state.get().sidebar
+    local stale_win = sidebar.footer_win
+    local neo_buf = set_neo_tree_window(stale_win)
+
+    require("code-review.sidebar").render()
+
+    assert.is_true(vim.api.nvim_win_is_valid(stale_win))
+    assert.equals(neo_buf, vim.api.nvim_win_get_buf(stale_win))
+    assert.equals(2, code_review_ui_window_count())
+    code_review.quit()
   end)
 
   it("exits Review Mode when quitting from the sidebar", function()

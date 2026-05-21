@@ -63,65 +63,37 @@ local function start_sidebar_timer()
   end)
 end
 
-local option_profile_fields = {
-  "cursorline",
-  "cursorlineopt",
-  "foldcolumn",
-  "wrap",
-  "list",
-  "spell",
-  "number",
-  "relativenumber",
-  "signcolumn",
-  "winhighlight",
-  "winbar",
-}
-
-local function capture_work_window_options(win)
-  if not navigation.work_window(win) then
-    return
-  end
-  local profile = {}
-  for _, field in ipairs(option_profile_fields) do
-    pcall(function()
-      profile[field] = vim.wo[win][field]
-    end)
-  end
-  state.get().last_work_window_options = profile
-end
-
-local function refresh_work_window_snapshot()
+local function refresh_content_window_snapshot()
   if not state.is_active() then
     return
   end
   local s = state.get()
-  s.work_windows = navigation.snapshot_work_windows()
-  local current = vim.api.nvim_get_current_win()
-  if navigation.work_window(current) then
-    capture_work_window_options(current)
-  end
+  s.content_windows = navigation.snapshot_content_windows()
 end
 
 local function only_auxiliary_windows_remain(tab)
   local wins = vim.api.nvim_tabpage_list_wins(tab or 0)
-  if #wins == 0 then
-    return false
-  end
+  local normal_count = 0
   for _, win in ipairs(wins) do
-    if navigation.work_window(win) then
+    if not navigation.normal_window(win) then
+      goto continue
+    end
+    normal_count = normal_count + 1
+    if navigation.content_window(win) then
       return false
     end
     if not navigation.aux_window(win) then
       return false
     end
+    ::continue::
   end
-  return true
+  return normal_count > 0
 end
 
-local function other_tabs_have_work_window()
+local function other_tabs_have_content_window()
   local current_tab = vim.api.nvim_get_current_tabpage()
   for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
-    if tab ~= current_tab and #navigation.tab_work_windows(tab) > 0 then
+    if tab ~= current_tab and #navigation.tab_content_windows(tab) > 0 then
       return true
     end
   end
@@ -151,11 +123,14 @@ local function schedule_auxiliary_only_check()
     if not state.is_active() or state.get().session_id ~= session_id then
       return
     end
-    if #navigation.tab_work_windows(0) > 0 or not only_auxiliary_windows_remain(0) then
+    if state.get().preview or state.get().preview_restoring then
       return
     end
-    local other_tabs_had_work = other_tabs_have_work_window()
-    if other_tabs_had_work then
+    if #navigation.tab_content_windows(0) > 0 or not only_auxiliary_windows_remain(0) then
+      return
+    end
+    local other_tabs_had_content = other_tabs_have_content_window()
+    if other_tabs_had_content then
       state.get().tearing_down = true
       M.quit()
       if #vim.api.nvim_list_tabpages() > 1 then
@@ -188,13 +163,20 @@ local function create_augroup()
     callback = function()
       local current = state.get()
       local buf = vim.api.nvim_get_current_buf()
+      if current.active and current.preview and current.preview.buf == buf then
+        require("code-review.preview").prepare_window_quit()
+        return
+      end
+      if current.active and (current.preview or current.preview_restoring) then
+        return
+      end
       if current.active and current.sidebar and (current.sidebar.buf == buf or current.sidebar.footer_buf == buf) then
-        if #navigation.tab_work_windows(0) == 0 and only_auxiliary_windows_remain(0) then
+        if #navigation.tab_content_windows(0) == 0 and only_auxiliary_windows_remain(0) then
           M._exit_auxiliary_layout()
         else
           M.quit()
         end
-      elseif current.active and #navigation.tab_work_windows(0) == 0 and only_auxiliary_windows_remain(0) then
+      elseif current.active and #navigation.tab_content_windows(0) == 0 and only_auxiliary_windows_remain(0) then
         M._exit_auxiliary_layout()
       end
     end,
@@ -217,7 +199,7 @@ local function create_augroup()
         closing
         and current.sidebar
         and (closing == current.sidebar.win or closing == current.sidebar.footer_win)
-        and #navigation.tab_work_windows(0) > 0
+        and #navigation.tab_content_windows(0) > 0
       then
         vim.schedule(function()
           if state.is_active() then
@@ -229,9 +211,9 @@ local function create_augroup()
         end)
         return
       end
-      local was_work = closing and current.work_windows and current.work_windows[closing]
-      refresh_work_window_snapshot()
-      if was_work then
+      local was_content = closing and current.content_windows and current.content_windows[closing]
+      refresh_content_window_snapshot()
+      if was_content then
         schedule_auxiliary_only_check()
       end
     end,
@@ -239,8 +221,16 @@ local function create_augroup()
   vim.api.nvim_create_autocmd({ "WinEnter", "BufWinEnter", "BufEnter" }, {
     group = s.augroup,
     callback = function()
-      refresh_work_window_snapshot()
+      refresh_content_window_snapshot()
       require("code-review.sidebar").capture_width_from_sidebar()
+      if #navigation.tab_content_windows(0) > 0 then
+        local session_id = state.get().session_id
+        vim.schedule(function()
+          if state.is_active() and state.get().session_id == session_id and #navigation.tab_content_windows(0) > 0 then
+            require("code-review.sidebar").render()
+          end
+        end)
+      end
       schedule_auxiliary_only_check()
     end,
   })
@@ -254,10 +244,18 @@ local function create_augroup()
     group = s.augroup,
     callback = function(args)
       if args.event == "BufDelete" or args.event == "BufUnload" then
-        refresh_work_window_snapshot()
+        if state.get().recreating_sidebar then
+          return
+        end
+        refresh_content_window_snapshot()
         schedule_auxiliary_only_check()
-        if state.is_active() then
-          require("code-review.sidebar").render()
+        if state.is_active() and #navigation.tab_content_windows(0) > 0 then
+          local session_id = state.get().session_id
+          vim.schedule(function()
+            if state.is_active() and state.get().session_id == session_id and #navigation.tab_content_windows(0) > 0 then
+              require("code-review.sidebar").render()
+            end
+          end)
         end
         return
       elseif args.event == "VimResized" or args.event == "WinResized" then
@@ -326,7 +324,7 @@ function M.start()
   end
   require("code-review.sidebar").render()
   create_augroup()
-  refresh_work_window_snapshot()
+  refresh_content_window_snapshot()
   start_sidebar_timer()
   require("code-review.highlights").refresh()
   if handle.store.last_active_review_id then

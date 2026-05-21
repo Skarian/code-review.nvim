@@ -305,20 +305,20 @@ function M.preview()
   end
   local text = preview.render_review(review)
   local function open_preview()
-    s.preview = { buf = preview.open(text), previous_mode = s.mode }
-    state.set_mode("preview")
+    local buf = preview.open(text, s.mode)
+    if buf and vim.api.nvim_buf_is_valid(buf) then
+      state.set_mode("preview")
+    end
   end
   if s.preview and s.preview.buf and vim.api.nvim_buf_is_valid(s.preview.buf) then
     if vim.bo[s.preview.buf].modified then
       vim.ui.select({ "Replace", "Cancel" }, { prompt = "Replace modified preview?" }, function(choice)
         if choice == "Replace" then
-          pcall(vim.api.nvim_buf_delete, s.preview.buf, { force = true })
           open_preview()
         end
       end)
       return
     end
-    pcall(vim.api.nvim_buf_delete, s.preview.buf, { force = true })
   end
   open_preview()
 end

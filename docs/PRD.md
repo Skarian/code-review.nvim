@@ -513,7 +513,7 @@ Highlight groups:
 
 ## Sidebar
 
-The sidebar is visible while Review Mode is active. Review Mode starts only when a visible named file buffer is available, but after start it can remain anchored by any normal work window, including unnamed or outside-root buffers.
+The sidebar is visible while Review Mode is active. Review Mode starts only when a visible named file buffer is available, but after start it can remain anchored by any content window, including unnamed normal buffers, outside-root normal buffers, and the Code Review preview.
 
 Content:
 
@@ -535,9 +535,9 @@ Behavior:
 - Stores no durable data.
 - Rendering is derived from current state and durable Review data.
 - Legend remains fixed while the overview scrolls or re-renders.
-- If closed directly while a work window remains, recreate on the next render or window lifecycle event.
+- If closed directly while a content window remains, recreate on the next render or window lifecycle event.
 - File explorers such as neo-tree can coexist with the sidebar; opening a file explorer must not close Review Mode.
-- If the last normal work window is closed or replaced and only auxiliary/plugin panes remain, Code Review removes its sidebar/footer and lets the editor exit or clean up the auxiliary-only layout.
+- If the last content window is closed or replaced and only auxiliary/plugin panes remain, Code Review removes its sidebar/footer and lets the editor exit or clean up the auxiliary-only layout.
 
 ## Comment Editor
 
@@ -581,19 +581,21 @@ Composer draft references should be highlighted while the composer is open and c
 
 ## Preview
 
-The preview action validates the active Review and opens an editable scratch buffer in the current window.
+The preview action validates the active Review and opens an editable throwaway content buffer in a main editor window.
 
 Buffer rules:
 
-- Opens in the current window, replacing the visible code buffer in that window.
+- Opens in the current content window, replacing the visible buffer in that window.
+- If focus is in an auxiliary pane such as neo-tree, opens in a visible source/content window instead of replacing the auxiliary pane.
 - Keeps Review Mode active and sidebar visible while the preview is open.
-- `buftype=nofile`, `buflisted=false`, `bufhidden=wipe`, `swapfile=false`.
+- `buftype=nofile`, `buflisted=true`, `bufhidden=wipe`, `filetype=code-review-preview`, `swapfile=false`.
 - Receives no Review Mode action mappings.
+- Receives no preview-local close mappings; user/global close-buffer mappings should continue to work.
 - Is editable.
 - Edits never mutate Review data.
 - Only one preview buffer exists per Review Mode session.
 
-Preview is valid only from normal code buffers inside the locked root.
+Preview is a content buffer that keeps Review Mode alive, but it is not a source buffer. Source actions such as creating File References, refreshing source highlights, and source-line sidebar filtering still require named file buffers inside the locked root.
 
 Preview is blocked if:
 
@@ -612,9 +614,10 @@ Blocking notifications include counts when useful, for example:
 
 Re-running preview:
 
-- Replaces an unmodified existing preview.
+- Refreshes an unmodified existing preview in place.
 - Prompts before replacing a modified preview.
 - On Review Mode quit, force-wipes preview buffers without prompting.
+- Raw close paths such as `:bdelete` or `:confirm q` restore the previous source buffer before auxiliary-only cleanup can close Review Mode.
 
 Format:
 
