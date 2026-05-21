@@ -208,6 +208,758 @@ describe("lifecycle and keymaps", function()
     code_review.quit()
   end)
 
+  it("deletes all reviews from the review picker after confirmation", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" } })
+    vim.cmd.edit(project .. "/x.lua")
+    code_review.start()
+    actions.create_review("One")
+    actions.create_review("Two")
+    local store = state.get().store
+    local old_select = vim.ui.select
+    local old_input = vim.ui.input
+    vim.ui.select = function(items, opts, cb)
+      if opts.prompt == "Code Review" then
+        for _, item in ipairs(items) do
+          if item.id == "__delete_all" then
+            cb(item)
+            return
+          end
+        end
+      else
+        cb("Delete All")
+      end
+    end
+    local prompted_for_name = false
+    vim.ui.input = function(_, cb)
+      prompted_for_name = true
+      cb(nil)
+    end
+
+    require("code-review.review_picker").open()
+
+    vim.ui.select = old_select
+    vim.ui.input = old_input
+    assert.equals(0, #store.reviews)
+    assert.equals(nil, store.last_active_review_id)
+    assert.is_true(prompted_for_name)
+    assert.is_false(code_review.is_active())
+  end)
+
+  it("keeps all reviews when deleting all is cancelled", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" } })
+    vim.cmd.edit(project .. "/x.lua")
+    code_review.start()
+    actions.create_review("One")
+    actions.create_review("Two")
+    local active = state.get().active_review_id
+    local old_select = vim.ui.select
+    vim.ui.select = function(_, _, cb)
+      cb("Cancel")
+    end
+
+    actions.delete_all_reviews()
+
+    vim.ui.select = old_select
+    assert.equals(2, #state.get().store.reviews)
+    assert.equals(active, state.get().active_review_id)
+    assert.equals("comment_list", state.mode())
+    code_review.quit()
+  end)
+
+  it("restores the previous mode when delete all is cancelled from the review picker", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" } })
+    vim.cmd.edit(project .. "/x.lua")
+    code_review.start()
+    actions.create_review("One")
+    local old_select = vim.ui.select
+    vim.ui.select = function(items, opts, cb)
+      if opts.prompt == "Code Review" then
+        for _, item in ipairs(items) do
+          if item.id == "__delete_all" then
+            cb(item)
+            return
+          end
+        end
+      else
+        cb("Cancel")
+      end
+    end
+
+    require("code-review.review_picker").open()
+
+    vim.ui.select = old_select
+    assert.equals(1, #state.get().store.reviews)
+    assert.equals("comment_list", state.mode())
+    code_review.quit()
+  end)
+
+  it("restores the previous mode when delete current is cancelled from the review picker", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" } })
+    vim.cmd.edit(project .. "/x.lua")
+    code_review.start()
+    actions.create_review("One")
+    local old_select = vim.ui.select
+    vim.ui.select = function(items, opts, cb)
+      if opts.prompt == "Code Review" then
+        for _, item in ipairs(items) do
+          if item.id == "__delete" then
+            cb(item)
+            return
+          end
+        end
+      else
+        cb("Cancel")
+      end
+    end
+
+    require("code-review.review_picker").open()
+
+    vim.ui.select = old_select
+    assert.equals(1, #state.get().store.reviews)
+    assert.equals("comment_list", state.mode())
+    code_review.quit()
+  end)
+
+  it("ignores stale delete-all confirmations after Review Mode exits", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" } })
+    vim.cmd.edit(project .. "/x.lua")
+    code_review.start()
+    actions.create_review("One")
+    local store = state.get().store
+    local deferred
+    local old_select = vim.ui.select
+    vim.ui.select = function(_, _, cb)
+      deferred = cb
+    end
+
+    actions.delete_all_reviews()
+    code_review.quit()
+    deferred("Delete All")
+
+    vim.ui.select = old_select
+    assert.equals(1, #store.reviews)
+    assert.is_false(code_review.is_active())
+  end)
+
+  it("ignores stale delete-all cancellation after Review Mode restarts", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local state = require("code-review.state")
+    local project_a = vim.fn.tempname()
+    local project_b = vim.fn.tempname()
+    vim.fn.mkdir(project_a .. "/.git", "p")
+    vim.fn.mkdir(project_b .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project_a .. "/x.lua")
+    vim.fn.writefile({ "x" }, project_b .. "/x.lua")
+    config.setup({ storage = { dir = vim.fn.tempname() .. "/store" } })
+    vim.cmd.edit(project_a .. "/x.lua")
+    code_review.start()
+    actions.create_review("One")
+    state.set_mode("preview")
+    local deferred
+    local old_select = vim.ui.select
+    vim.ui.select = function(items, opts, cb)
+      if opts.prompt == "Code Review" then
+        for _, item in ipairs(items) do
+          if item.id == "__delete_all" then
+            cb(item)
+            return
+          end
+        end
+      else
+        deferred = cb
+      end
+    end
+
+    require("code-review.review_picker").open()
+    vim.ui.select = old_select
+    code_review.quit()
+    vim.cmd.edit(project_b .. "/x.lua")
+    code_review.start()
+    actions.create_review("Two")
+    local session_id = state.get().session_id
+    deferred("Cancel")
+
+    assert.is_true(code_review.is_active())
+    assert.equals(session_id, state.get().session_id)
+    assert.equals("comment_list", state.mode())
+    assert.equals(1, #state.get().store.reviews)
+    code_review.quit()
+  end)
+
+  it("ignores superseded picker delete-all confirmations", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" } })
+    vim.cmd.edit(project .. "/x.lua")
+    code_review.start()
+    actions.create_review("One")
+    actions.create_review("Two")
+    local deferred
+    local old_select = vim.ui.select
+    local old_input = vim.ui.input
+    vim.ui.select = function(items, opts, cb)
+      if opts.prompt == "Code Review" then
+        for _, item in ipairs(items) do
+          if item.id == "__delete_all" then
+            cb(item)
+            return
+          end
+        end
+      else
+        deferred = cb
+      end
+    end
+    vim.ui.input = function(_, cb)
+      cb(nil)
+    end
+
+    require("code-review.review_picker").open()
+    vim.ui.select = function() end
+    require("code-review.review_picker").open()
+    deferred("Delete All")
+
+    vim.ui.select = old_select
+    vim.ui.input = old_input
+    assert.is_true(code_review.is_active())
+    assert.equals(2, #state.get().store.reviews)
+    assert.equals("review_picker", state.mode())
+    code_review.quit()
+  end)
+
+  it("ignores superseded picker delete-all cancellations", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" } })
+    vim.cmd.edit(project .. "/x.lua")
+    code_review.start()
+    actions.create_review("One")
+    actions.create_review("Two")
+    local deferred
+    local old_select = vim.ui.select
+    vim.ui.select = function(items, opts, cb)
+      if opts.prompt == "Code Review" then
+        for _, item in ipairs(items) do
+          if item.id == "__delete_all" then
+            cb(item)
+            return
+          end
+        end
+      else
+        deferred = cb
+      end
+    end
+
+    require("code-review.review_picker").open()
+    vim.ui.select = function() end
+    require("code-review.review_picker").open()
+    state.set_mode("comment_list")
+    deferred("Cancel")
+
+    vim.ui.select = old_select
+    assert.equals("comment_list", state.mode())
+    assert.equals(2, #state.get().store.reviews)
+    code_review.quit()
+  end)
+
+  it("ignores stale review picker cancellation after the mode changes", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" } })
+    vim.cmd.edit(project .. "/x.lua")
+    code_review.start()
+    actions.create_review("One")
+    state.set_mode("preview")
+    local deferred
+    local old_select = vim.ui.select
+    vim.ui.select = function(_, _, cb)
+      deferred = cb
+    end
+
+    require("code-review.review_picker").open()
+    vim.ui.select = old_select
+    state.set_mode("comment_list")
+    deferred(nil)
+
+    assert.equals("comment_list", state.mode())
+    assert.is_true(code_review.is_active())
+    code_review.quit()
+  end)
+
+  it("ignores stale review picker selections after the mode changes", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" } })
+    vim.cmd.edit(project .. "/x.lua")
+    code_review.start()
+    actions.create_review("One")
+    local original = state.get().active_review_id
+    actions.create_review("Two")
+    actions.select_review(original)
+    state.set_mode("preview")
+    local deferred
+    local picker_items
+    local old_select = vim.ui.select
+    vim.ui.select = function(items, _, cb)
+      picker_items = items
+      deferred = cb
+    end
+
+    require("code-review.review_picker").open()
+    vim.ui.select = old_select
+    state.set_mode("comment_list")
+    for _, item in ipairs(picker_items) do
+      if item.id and item.id ~= "__new" and item.id ~= "__delete" and item.id ~= "__delete_all" and item.id ~= original then
+        deferred(item)
+        break
+      end
+    end
+
+    assert.equals(original, state.get().active_review_id)
+    assert.equals("comment_list", state.mode())
+    code_review.quit()
+  end)
+
+  it("ignores stale delete-review confirmations after Review Mode exits", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" } })
+    vim.cmd.edit(project .. "/x.lua")
+    code_review.start()
+    actions.create_review("One")
+    local store = require("code-review.state").get().store
+    local deferred
+    local old_select = vim.ui.select
+    vim.ui.select = function(_, _, cb)
+      deferred = cb
+    end
+
+    actions.delete_review()
+    vim.ui.select = old_select
+    code_review.quit()
+    local ok = pcall(function()
+      deferred("Delete")
+    end)
+
+    assert.is_true(ok)
+    assert.equals(1, #store.reviews)
+    assert.is_false(code_review.is_active())
+  end)
+
+  it("ignores stale delete-review confirmations after active review changes", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" } })
+    vim.cmd.edit(project .. "/x.lua")
+    code_review.start()
+    actions.create_review("One")
+    actions.create_review("Two")
+    local stale_review = state.get().active_review_id
+    local deferred
+    local old_select = vim.ui.select
+    vim.ui.select = function(_, _, cb)
+      deferred = cb
+    end
+
+    actions.delete_review()
+    vim.ui.select = old_select
+    for _, review in ipairs(state.get().store.reviews) do
+      if review.id ~= stale_review then
+        actions.select_review(review.id)
+        break
+      end
+    end
+    deferred("Delete")
+
+    assert.truthy(require("code-review.model").find_review(state.get().store, stale_review))
+    assert.equals(2, #state.get().store.reviews)
+    code_review.quit()
+  end)
+
+  it("ignores superseded picker delete-current confirmations", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" } })
+    vim.cmd.edit(project .. "/x.lua")
+    code_review.start()
+    actions.create_review("One")
+    actions.create_review("Two")
+    local active = state.get().active_review_id
+    local deferred
+    local old_select = vim.ui.select
+    vim.ui.select = function(items, opts, cb)
+      if opts.prompt == "Code Review" then
+        for _, item in ipairs(items) do
+          if item.id == "__delete" then
+            cb(item)
+            return
+          end
+        end
+      else
+        deferred = cb
+      end
+    end
+
+    require("code-review.review_picker").open()
+    vim.ui.select = function() end
+    require("code-review.review_picker").open()
+    deferred("Delete")
+
+    vim.ui.select = old_select
+    assert.truthy(require("code-review.model").find_review(state.get().store, active))
+    assert.equals(2, #state.get().store.reviews)
+    assert.equals("review_picker", state.mode())
+    code_review.quit()
+  end)
+
+  it("ignores superseded picker delete-current cancellations", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" } })
+    vim.cmd.edit(project .. "/x.lua")
+    code_review.start()
+    actions.create_review("One")
+    local deferred
+    local old_select = vim.ui.select
+    vim.ui.select = function(items, opts, cb)
+      if opts.prompt == "Code Review" then
+        for _, item in ipairs(items) do
+          if item.id == "__delete" then
+            cb(item)
+            return
+          end
+        end
+      else
+        deferred = cb
+      end
+    end
+
+    require("code-review.review_picker").open()
+    vim.ui.select = function() end
+    require("code-review.review_picker").open()
+    state.set_mode("comment_list")
+    deferred("Cancel")
+
+    vim.ui.select = old_select
+    assert.equals("comment_list", state.mode())
+    assert.equals(1, #state.get().store.reviews)
+    code_review.quit()
+  end)
+
+  it("ignores stale review-name input after Review Mode restarts", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local state = require("code-review.state")
+    local project_a = vim.fn.tempname()
+    local project_b = vim.fn.tempname()
+    vim.fn.mkdir(project_a .. "/.git", "p")
+    vim.fn.mkdir(project_b .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project_a .. "/x.lua")
+    vim.fn.writefile({ "x" }, project_b .. "/x.lua")
+    config.setup({ storage = { dir = vim.fn.tempname() .. "/store" } })
+    vim.cmd.edit(project_a .. "/x.lua")
+    code_review.start()
+    actions.create_review("One")
+    local deferred_input
+    local old_select = vim.ui.select
+    local old_input = vim.ui.input
+    vim.ui.select = function(items, opts, cb)
+      if opts.prompt == "Code Review" then
+        for _, item in ipairs(items) do
+          if item.id == "__new" then
+            cb(item)
+            return
+          end
+        end
+      end
+    end
+    vim.ui.input = function(_, cb)
+      deferred_input = cb
+    end
+
+    require("code-review.review_picker").open()
+    vim.ui.select = old_select
+    vim.ui.input = old_input
+    code_review.quit()
+    vim.cmd.edit(project_b .. "/x.lua")
+    code_review.start()
+    actions.create_review("Two")
+    deferred_input("Stale")
+
+    assert.equals(1, #state.get().store.reviews)
+    assert.equals("Two", state.get().store.reviews[1].name)
+    code_review.quit()
+  end)
+
+  it("blocks delete all while preview is open", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local model = require("code-review.model")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" } })
+    vim.cmd.edit(project .. "/x.lua")
+    code_review.start()
+    actions.create_review("One")
+    local review = model.find_review(state.get().store, state.get().active_review_id)
+    local comment = model.new_comment()
+    comment.body = "ready"
+    table.insert(comment.file_references, model.new_file_reference({
+      relative_path = "x.lua",
+      start_line = 1,
+      end_line = 1,
+      selected_lines_snapshot = { "x" },
+    }))
+    table.insert(review.comments, comment)
+    actions.preview()
+    assert.equals("preview", state.mode())
+    local preview_buf = state.get().preview.buf
+    local old_notify = vim.notify
+    local messages = {}
+    vim.notify = function(message)
+      messages[#messages + 1] = message
+    end
+
+    actions.delete_all_reviews()
+
+    vim.notify = old_notify
+    assert.equals("Close the preview before deleting all Reviews.", messages[1])
+    assert.equals(1, #state.get().store.reviews)
+    assert.equals("preview", state.mode())
+    assert.equals(preview_buf, state.get().preview.buf)
+    code_review.quit()
+  end)
+
+  it("returns to preview when delete all is blocked from the review picker", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local model = require("code-review.model")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" } })
+    vim.cmd.edit(project .. "/x.lua")
+    code_review.start()
+    actions.create_review("One")
+    local review = model.find_review(state.get().store, state.get().active_review_id)
+    local comment = model.new_comment()
+    comment.body = "ready"
+    table.insert(comment.file_references, model.new_file_reference({
+      relative_path = "x.lua",
+      start_line = 1,
+      end_line = 1,
+      selected_lines_snapshot = { "x" },
+    }))
+    table.insert(review.comments, comment)
+    actions.preview()
+    local old_select = vim.ui.select
+    local old_notify = vim.notify
+    local messages = {}
+    vim.ui.select = function(items, opts, cb)
+      if opts.prompt == "Code Review" then
+        for _, item in ipairs(items) do
+          if item.id == "__delete_all" then
+            cb(item)
+            return
+          end
+        end
+      end
+    end
+    vim.notify = function(message)
+      messages[#messages + 1] = message
+    end
+
+    require("code-review.review_picker").open()
+
+    vim.ui.select = old_select
+    vim.notify = old_notify
+    assert.equals("Close the preview before deleting all Reviews.", messages[1])
+    assert.equals("preview", state.mode())
+    assert.equals(1, #state.get().store.reviews)
+    code_review.quit()
+  end)
+
+  it("blocks delete current while preview is open", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local model = require("code-review.model")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" } })
+    vim.cmd.edit(project .. "/x.lua")
+    code_review.start()
+    actions.create_review("One")
+    actions.create_review("Two")
+    local active = state.get().active_review_id
+    local review = model.find_review(state.get().store, active)
+    local comment = model.new_comment()
+    comment.body = "ready"
+    table.insert(comment.file_references, model.new_file_reference({
+      relative_path = "x.lua",
+      start_line = 1,
+      end_line = 1,
+      selected_lines_snapshot = { "x" },
+    }))
+    table.insert(review.comments, comment)
+    actions.preview()
+    local preview_buf = state.get().preview.buf
+    local old_notify = vim.notify
+    local messages = {}
+    vim.notify = function(message)
+      messages[#messages + 1] = message
+    end
+
+    actions.delete_review()
+
+    vim.notify = old_notify
+    assert.equals("Close the preview before deleting Reviews.", messages[1])
+    assert.equals(active, state.get().active_review_id)
+    assert.equals(2, #state.get().store.reviews)
+    assert.equals("preview", state.mode())
+    assert.equals(preview_buf, state.get().preview.buf)
+    code_review.quit()
+  end)
+
+  it("returns to preview when delete current is blocked from the review picker", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local model = require("code-review.model")
+    local state = require("code-review.state")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" } })
+    vim.cmd.edit(project .. "/x.lua")
+    code_review.start()
+    actions.create_review("One")
+    actions.create_review("Two")
+    local active = state.get().active_review_id
+    local review = model.find_review(state.get().store, active)
+    local comment = model.new_comment()
+    comment.body = "ready"
+    table.insert(comment.file_references, model.new_file_reference({
+      relative_path = "x.lua",
+      start_line = 1,
+      end_line = 1,
+      selected_lines_snapshot = { "x" },
+    }))
+    table.insert(review.comments, comment)
+    actions.preview()
+    local preview_buf = state.get().preview.buf
+    local old_select = vim.ui.select
+    local old_notify = vim.notify
+    local messages = {}
+    vim.ui.select = function(items, opts, cb)
+      if opts.prompt == "Code Review" then
+        for _, item in ipairs(items) do
+          if item.id == "__delete" then
+            cb(item)
+            return
+          end
+        end
+      end
+    end
+    vim.notify = function(message)
+      messages[#messages + 1] = message
+    end
+
+    require("code-review.review_picker").open()
+
+    vim.ui.select = old_select
+    vim.notify = old_notify
+    assert.equals("Close the preview before deleting Reviews.", messages[1])
+    assert.equals(active, state.get().active_review_id)
+    assert.equals(2, #state.get().store.reviews)
+    assert.equals("preview", state.mode())
+    assert.equals(preview_buf, state.get().preview.buf)
+    code_review.quit()
+  end)
+
   it("exits Review Mode when cancelling initial review name input", function()
     local code_review = require("code-review")
     local config = require("code-review.config")

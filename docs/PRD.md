@@ -227,7 +227,7 @@ Rules:
 
 - No bare single-key mappings that shadow normal editing keys.
 - Default mappings are prefixed action mappings under `keymaps.prefix`.
-- `review_picker` is the key-driven Review picker action. If inactive, it performs the same startup work as `:CodeReview` and then opens the Review picker. If active, it opens the Review picker subject to state guards.
+- `review_picker` is the key-driven Review picker action. If inactive, it performs the same startup work as `:CodeReview` and then opens the Review picker. If active, it opens the Review picker subject to state guards. The Review picker can create, switch, delete the current Review, or delete all Reviews after confirmation.
 - Actions other than `review_picker` require Review Mode to be active and notify without side effects when inactive.
 - Default mappings must not make `<leader>r` itself wait for a shorter conflicting mapping, because `<leader>r` is not mapped by the plugin.
 - Default child mappings are installed at setup time so `<leader>rR` can start Review Mode from inactive state.
@@ -265,7 +265,7 @@ Core transitions:
 
 Guards:
 
-- Review picker opens only from `comment_list`.
+- Review picker opens from `comment_list`, `review_picker`, or `preview`; it is blocked from the Comment Editor and voice states.
 - Switching Reviews from `composer`, `recording`, `transcribing`, or `voice_error_pending` is blocked.
 - Preview is blocked while a composer is open, recording, transcribing, or voice error is pending.
 - While the Comment Editor is open, code-buffer Review Mode actions notify: `Submit or cancel the Comment Editor first.`

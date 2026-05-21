@@ -72,7 +72,8 @@ function M.select_review(review_id)
   persist()
 end
 
-function M.delete_review()
+function M.delete_review(opts)
+  opts = opts or {}
   if not require_active() then
     return
   end
@@ -80,30 +81,115 @@ function M.delete_review()
     return
   end
   local s = state.get()
+  if s.preview then
+    notify.warn("Close the preview before deleting Reviews.")
+    if opts.cancel and (not opts.request_current or opts.request_current()) then
+      opts.cancel()
+    end
+    return
+  end
   local review = active_review()
   if not review then
     notify.warn("No active Review.")
     return
   end
+  local session_id = s.session_id
+  local root = s.root
+  local store = s.store
+  local mode = s.mode
+  local review_id = review.id
+  local function transaction_current()
+    local current = state.get()
+    return current.active
+      and current.session_id == session_id
+      and current.root == root
+      and current.store == store
+      and current.mode == mode
+      and current.active_review_id == review_id
+      and (not opts.request_current or opts.request_current())
+  end
   vim.ui.select({ "Delete", "Cancel" }, { prompt = "Delete Review " .. review.name .. "?" }, function(choice)
     if choice ~= "Delete" then
+      if transaction_current() and opts.cancel then
+        opts.cancel()
+      end
       return
     end
-    for idx, item in ipairs(s.store.reviews) do
-      if item.id == review.id then
-        table.remove(s.store.reviews, idx)
+    if not transaction_current() then
+      return
+    end
+    local current = state.get()
+    for idx, item in ipairs(current.store.reviews) do
+      if item.id == review_id then
+        table.remove(current.store.reviews, idx)
         break
       end
     end
-    model.sort_reviews(s.store.reviews)
-    local next_review = s.store.reviews[1]
-    s.active_review_id = next_review and next_review.id or nil
-    s.store.last_active_review_id = s.active_review_id
-    state.set_mode(s.active_review_id and "comment_list" or "review_picker")
+    model.sort_reviews(current.store.reviews)
+    local next_review = current.store.reviews[1]
+    current.active_review_id = next_review and next_review.id or nil
+    current.store.last_active_review_id = current.active_review_id
+    state.set_mode(current.active_review_id and "comment_list" or "review_picker")
     persist()
-    if not s.active_review_id then
+    if not current.active_review_id then
       require("code-review.review_picker").open()
     end
+  end)
+end
+
+function M.delete_all_reviews(opts)
+  opts = opts or {}
+  if not require_active() then
+    return
+  end
+  if blocked_by_editor_or_voice() then
+    return
+  end
+  local s = state.get()
+  if s.preview then
+    notify.warn("Close the preview before deleting all Reviews.")
+    if opts.cancel then
+      opts.cancel()
+    end
+    return
+  end
+  if #(s.store.reviews or {}) == 0 then
+    notify.warn("No Reviews to delete.")
+    if opts.cancel then
+      opts.cancel()
+    end
+    return
+  end
+  local session_id = s.session_id
+  local root = s.root
+  local store = s.store
+  local mode = s.mode
+  local function transaction_current()
+    local current = state.get()
+    return current.active
+      and current.session_id == session_id
+      and current.root == root
+      and current.store == store
+      and current.mode == mode
+      and (not opts.request_current or opts.request_current())
+  end
+  vim.ui.select({ "Delete All", "Cancel" }, { prompt = "Delete all Reviews?" }, function(choice)
+    if not transaction_current() then
+      return
+    end
+    if choice ~= "Delete All" then
+      if opts.cancel then
+        opts.cancel()
+      end
+      return
+    end
+    local current = state.get()
+    current.store.reviews = {}
+    current.active_review_id = nil
+    current.store.last_active_review_id = nil
+    state.set_mode("review_picker")
+    persist()
+    require("code-review.review_picker").open()
   end)
 end
 

@@ -21,6 +21,7 @@ local state = {
   tearing_down = false,
   recreating_sidebar = false,
   auxiliary_exit_requested = false,
+  picker_request_id = 0,
 }
 
 function M.get()
@@ -43,10 +44,20 @@ function M.set_mode(mode)
   state.mode = mode
 end
 
+function M.next_picker_request_id()
+  state.picker_request_id = (state.picker_request_id or 0) + 1
+  return state.picker_request_id
+end
+
+function M.picker_request_id()
+  return state.picker_request_id or 0
+end
+
 function M.activate(root, root_hash, store, storage)
   state.active = true
   state.mode = "comment_list"
   state.session_id = state.session_id + 1
+  state.picker_request_id = (state.picker_request_id or 0) + 1
   state.root = root
   state.root_hash = root_hash
   state.store = store
@@ -63,6 +74,7 @@ function M.deactivate()
   state.active = false
   state.mode = "inactive"
   state.session_id = state.session_id + 1
+  state.picker_request_id = (state.picker_request_id or 0) + 1
   state.root = nil
   state.root_hash = nil
   state.store = nil
@@ -88,6 +100,7 @@ function M.reset()
   state.active = false
   state.mode = "inactive"
   state.session_id = session_id
+  state.picker_request_id = 0
   state.mappings = {}
 end
 

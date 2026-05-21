@@ -90,7 +90,7 @@ local function sidebar_help_lines()
     "  Key          Action",
   }
   if config.get().keymaps.enabled then
-    add_key_line(lines, configured_key("review_picker"), "Open the review picker to create, delete, or switch reviews")
+    add_key_line(lines, configured_key("review_picker"), "Open the review picker to create, delete, delete all, or switch reviews")
     add_key_line(lines, configured_key("edit_comment"), "Open the comment picker")
     lines[#lines + 1] = "                Enter opens the comment editor; in picker Normal mode, d deletes and o goes to the comment"
     add_key_line(lines, configured_key("edit_comment_under_cursor"), "Open the comment on the current line")

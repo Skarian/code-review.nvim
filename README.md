@@ -75,7 +75,7 @@ By default, `<leader>r` is only a parent namespace for which-key and child mappi
 | `<leader>ra` | From Visual mode, create a new Comment from the selected lines and open the Comment Editor. |
 | `<leader>rr` | From Visual mode, append the selected lines to an existing Comment through the Comment picker. |
 | `<leader>rc` | Open the Comment picker for edit, delete, or jump actions. |
-| `<leader>rR` | Start Review Mode if needed, then open the Review picker. |
+| `<leader>rR` | Start Review Mode if needed, then open the Review picker to create, switch, delete, or delete all Reviews. |
 | `<leader>rp` | Open preview. |
 | `<leader>rt` | Toggle Review Mode. |
 
