@@ -537,7 +537,8 @@ Behavior:
 - Legend remains fixed while the overview scrolls or re-renders.
 - If closed directly while a content window remains, recreate on the next render or window lifecycle event.
 - File explorers such as neo-tree can coexist with the sidebar; opening a file explorer must not close Review Mode.
-- If the last content window is closed or replaced and only auxiliary/plugin panes remain, Code Review removes its sidebar/footer and lets the editor exit or clean up the auxiliary-only layout.
+- Code Review may close or delete only sidebar/footer windows and buffers it still owns. If a recorded sidebar/footer window ID has been reused by normal content, neo-tree, or another plugin, Code Review must not close or resize that window.
+- If the last content window is closed or replaced and only auxiliary/plugin panes remain, Code Review follows the auxiliary-only confirm-all exit path.
 
 ## Comment Editor
 
@@ -585,14 +586,15 @@ The preview action validates the active Review and opens an editable throwaway c
 
 Buffer rules:
 
-- Opens in the current content window, replacing the visible buffer in that window.
-- If focus is in an auxiliary pane such as neo-tree, opens in a visible source/content window instead of replacing the auxiliary pane.
+- Opens source-first: current source window for the locked root, then previous source window, then any current-tab source window.
+- If no source window is visible, opens in a safe non-preview content window in the current tab.
+- Never replaces auxiliary panes such as sidebar, footer, neo-tree, or other plugin buffers. If no safe target exists, preview warns and does nothing.
 - Keeps Review Mode active and sidebar visible while the preview is open.
 - `buftype=nofile`, `buflisted=true`, `bufhidden=wipe`, `filetype=code-review-preview`, `swapfile=false`.
 - Receives no Review Mode action mappings.
 - Receives no preview-local close mappings; user/global close-buffer mappings should continue to work.
 - Is editable.
-- Edits never mutate Review data.
+- Edits are scratch-only and never mutate Review data. Under the current `nofile` preview contract, edits are not protected by a modified-preview replacement prompt.
 - Only one preview buffer exists per Review Mode session.
 
 Preview is a content buffer that keeps Review Mode alive, but it is not a source buffer. Source actions such as creating File References, refreshing source highlights, and source-line sidebar filtering still require named file buffers inside the locked root.
@@ -614,10 +616,9 @@ Blocking notifications include counts when useful, for example:
 
 Re-running preview:
 
-- Refreshes an unmodified existing preview in place.
-- Prompts before replacing a modified preview.
+- Refreshes the single preview buffer in place.
 - On Review Mode quit, force-wipes preview buffers without prompting.
-- Raw close paths such as `:bdelete` or `:confirm q` restore the previous source buffer before auxiliary-only cleanup can close Review Mode.
+- Raw close paths such as `:bdelete` or `:confirm q` restore the origin content buffer when possible without replacing unrelated user content. If the origin cannot be restored and other content remains, Code Review leaves that content untouched, restores Review Mode state, and keeps the sidebar coherent.
 
 Format:
 

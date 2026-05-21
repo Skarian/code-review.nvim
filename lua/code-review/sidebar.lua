@@ -163,35 +163,6 @@ local function close_orphan_sidebar_windows(sidebar)
   end
 end
 
-local function close_duplicate_empty_neo_tree_windows()
-  local neo_windows = {}
-  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-    local buf = vim.api.nvim_win_get_buf(win)
-    local ft = vim.bo[buf].filetype
-    if ft:match("^neo%-tree") then
-      neo_windows[#neo_windows + 1] = { win = win, name = vim.api.nvim_buf_get_name(buf) }
-    end
-  end
-  if #neo_windows < 2 then
-    return
-  end
-  local has_named = false
-  for _, item in ipairs(neo_windows) do
-    if item.name ~= "" then
-      has_named = true
-      break
-    end
-  end
-  if not has_named then
-    return
-  end
-  for _, item in ipairs(neo_windows) do
-    if item.name == "" and valid_win(item.win) then
-      pcall(vim.api.nvim_win_close, item.win, true)
-    end
-  end
-end
-
 local function sidebar_buf(sidebar, bufnr)
   return sidebar and (sidebar.buf == bufnr or sidebar.footer_buf == bufnr)
 end
@@ -305,9 +276,12 @@ function M.apply_desired_width()
     return
   end
   sidebar.reapplying_width = true
-  for _, win in ipairs({ sidebar.win, sidebar.footer_win }) do
-    if valid_win(win) and vim.api.nvim_win_get_width(win) ~= width then
-      pcall(vim.api.nvim_win_set_width, win, width)
+  for _, item in ipairs({
+    { win = sidebar.win, buf = sidebar.buf, filetype = "code-review-sidebar" },
+    { win = sidebar.footer_win, buf = sidebar.footer_buf, filetype = "code-review-sidebar-footer" },
+  }) do
+    if owned_window(item.win, item.buf, item.filetype) and vim.api.nvim_win_get_width(item.win) ~= width then
+      pcall(vim.api.nvim_win_set_width, item.win, width)
     end
   end
   sidebar.reapplying_width = false
@@ -321,15 +295,16 @@ function M.capture_width_from_sidebar()
     or sidebar.reapplying_width
     or s.recreating_sidebar
     or #require("code-review.navigation").tab_content_windows(0) == 0
-    or not valid_win(sidebar.win)
   then
     return
   end
   local current = vim.api.nvim_get_current_win()
-  if current ~= sidebar.win and current ~= sidebar.footer_win then
+  local is_owned_sidebar = current == sidebar.win and owned_window(sidebar.win, sidebar.buf, "code-review-sidebar")
+  local is_owned_footer = current == sidebar.footer_win and owned_window(sidebar.footer_win, sidebar.footer_buf, "code-review-sidebar-footer")
+  if not is_owned_sidebar and not is_owned_footer then
     return
   end
-  local width = vim.api.nvim_win_get_width(sidebar.win)
+  local width = vim.api.nvim_win_get_width(current)
   if width > 0 then
     sidebar.desired_width = width
   end
@@ -743,7 +718,6 @@ function M.render()
     }
   end
   close_orphan_sidebar_windows(s.sidebar)
-  close_duplicate_empty_neo_tree_windows()
   local buf, win, footer_buf = ensure()
   local width = valid_win(win) and vim.api.nvim_win_get_width(win) or config.get().sidebar.width
   local height = valid_win(win) and vim.api.nvim_win_get_height(win) or 1

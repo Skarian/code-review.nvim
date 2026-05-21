@@ -233,6 +233,53 @@ describe("sidebar", function()
     code_review.quit()
   end)
 
+  it("does not capture width from repurposed sidebar slots", function()
+    local code_review, state = start_sidebar_project()
+    code_review.start()
+    local sidebar = state.get().sidebar
+    local original_width = sidebar.desired_width
+
+    for _, win in ipairs({ sidebar.win, sidebar.footer_win }) do
+      local user_buf = vim.api.nvim_create_buf(true, false)
+      vim.api.nvim_buf_set_name(user_buf, vim.fn.tempname() .. ".lua")
+      vim.api.nvim_win_set_buf(win, user_buf)
+      vim.api.nvim_set_current_win(win)
+      vim.api.nvim_win_set_width(win, 77)
+
+      require("code-review.sidebar").capture_width_from_sidebar()
+
+      assert.equals(original_width, sidebar.desired_width)
+      assert.equals(user_buf, vim.api.nvim_win_get_buf(win))
+    end
+    code_review.quit()
+  end)
+
+  it("does not apply sidebar width to repurposed sidebar slots", function()
+    local code_review, state = start_sidebar_project()
+    code_review.start()
+    local sidebar = state.get().sidebar
+    sidebar.desired_width = 24
+    local stale_windows = { sidebar.win, sidebar.footer_win }
+    local stale = {}
+
+    for _, win in ipairs(stale_windows) do
+      local user_buf = vim.api.nvim_create_buf(true, false)
+      vim.api.nvim_buf_set_name(user_buf, vim.fn.tempname() .. ".lua")
+      vim.api.nvim_win_set_buf(win, user_buf)
+      vim.api.nvim_win_set_width(win, 77)
+      stale[#stale + 1] = { win = win, buf = user_buf, width = vim.api.nvim_win_get_width(win) }
+    end
+
+    require("code-review.sidebar").apply_desired_width()
+
+    for _, item in ipairs(stale) do
+      assert.is_true(vim.api.nvim_win_is_valid(item.win))
+      assert.equals(item.buf, vim.api.nvim_win_get_buf(item.win))
+      assert.equals(item.width, vim.api.nvim_win_get_width(item.win))
+    end
+    code_review.quit()
+  end)
+
   it("keeps Review Mode active when deleting a file leaves an unnamed content window", function()
     local code_review, state = start_sidebar_project()
     code_review.start()
@@ -461,6 +508,27 @@ describe("sidebar", function()
 
     assert.is_true(vim.api.nvim_win_is_valid(stale_win))
     assert.equals(neo_buf, vim.api.nvim_win_get_buf(stale_win))
+    assert.equals(2, code_review_ui_window_count())
+    code_review.quit()
+  end)
+
+  it("does not close unowned neo-tree windows during sidebar render", function()
+    local code_review = start_sidebar_project()
+    code_review.start()
+    vim.cmd.vsplit()
+    local named_neo_win = vim.api.nvim_get_current_win()
+    local named_neo_buf = set_neo_tree_window(named_neo_win)
+    pcall(vim.api.nvim_buf_set_name, named_neo_buf, "neo-tree filesystem [test]")
+    vim.cmd.vsplit()
+    local empty_neo_win = vim.api.nvim_get_current_win()
+    local empty_neo_buf = set_neo_tree_window(empty_neo_win)
+
+    require("code-review.sidebar").render()
+
+    assert.is_true(vim.api.nvim_win_is_valid(named_neo_win))
+    assert.is_true(vim.api.nvim_win_is_valid(empty_neo_win))
+    assert.equals(named_neo_buf, vim.api.nvim_win_get_buf(named_neo_win))
+    assert.equals(empty_neo_buf, vim.api.nvim_win_get_buf(empty_neo_win))
     assert.equals(2, code_review_ui_window_count())
     code_review.quit()
   end)

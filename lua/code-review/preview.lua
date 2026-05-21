@@ -93,11 +93,6 @@ local function restore_after_raw_close(preview)
       elseif valid_win(preview.survivor_win) then
         restored_win = preview.survivor_win
         vim.api.nvim_win_set_buf(restored_win, buf)
-      elseif #navigation.tab_content_windows(0) > 0 then
-        restored_win = navigation.find_preview_target_window(s.root)
-        if valid_win(restored_win) then
-          vim.api.nvim_win_set_buf(restored_win, buf)
-        end
       elseif #navigation.tab_content_windows(0) == 0 then
         restored_win = require("code-review.sidebar").replace_with_content_buffer(buf)
       end
