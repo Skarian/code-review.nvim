@@ -58,7 +58,7 @@ The workflow is code-buffer-first. The sidebar is a persistent overview and stat
 | References are exact | File References store path, line range, and selected line snapshot. Changed content becomes stale. |
 | Manual edit is first-class | Voice can be unavailable; users can still create and preview reviews manually. |
 | Voice auth is narrow | Read existing Codex ChatGPT file auth only. Do not mutate auth files or offer alternate credential flows. |
-| Preview is non-durable | Preview edits never modify stored Review data. |
+| Preview is non-durable | Preview edits never modify stored Review data; if a user writes preview text to disk, that buffer becomes a normal user file. |
 
 ## Vocabulary
 
@@ -67,7 +67,7 @@ The workflow is code-buffer-first. The sidebar is a persistent overview and stat
 - **File Reference**: an exact linewise reference to one saved file inside the locked project root. It stores relative path, one-based inclusive start/end lines, and the selected line snapshot.
 - **Sidebar**: a persistent read-only right split shown while Review Mode is active.
 - **Comment Editor**: a stacked floating layout for creating or editing complete Comments. It owns draft body text, draft references, validation, and local voice state until submit or cancel.
-- **Preview**: an editable unnamed normal buffer opened in the current window. It is regenerated from Review data and is never persisted by the plugin.
+- **Preview**: an editable unnamed normal buffer opened in the current window. It is regenerated from Review data and is never persisted by the plugin. If the user writes it to disk, Code Review detaches from that buffer and treats it as a normal user file.
 - **Stale File Reference**: a File Reference whose file is missing, range is invalid for current contents, current lines differ from the snapshot, or the reference cannot be checked safely.
 
 ## Runtime requirements
@@ -594,10 +594,10 @@ Buffer rules:
 - Receives no Review Mode action mappings.
 - Receives no preview-local close mappings; user/global close-buffer mappings should continue to work.
 - Is editable.
-- User edits make the preview buffer modified under normal Neovim rules. Saving the preview writes only that buffer's text and never mutates stored Review data.
-- Only one preview buffer exists per Review Mode session.
+- User edits make the preview buffer modified under normal Neovim rules. Saving the preview to a named buffer writes only that buffer's text, never mutates stored Review data, and promotes the buffer to normal user-owned content. Append writes such as `:write >> file` are export operations: they append text to the target file but leave the unnamed preview active and Code Review-owned.
+- Only one active generated preview buffer exists per Review Mode session. After a preview is saved and detached, future preview generation creates a fresh unnamed preview buffer.
 
-Preview is a content buffer that keeps Review Mode alive, but it is not a source buffer. A saved preview remains a Code Review preview buffer and is not eligible for File References, even if saved inside the locked root. Source actions such as creating File References, refreshing source highlights, and source-line sidebar filtering still require named file buffers inside the locked root.
+Preview is a content buffer that keeps Review Mode alive, but it is not a source buffer while Code Review owns it. After a successful write, Code Review detaches from the buffer: it is no longer restored, closed, reused, or classified as a preview by Code Review. A saved preview inside the locked root is a normal source buffer and may be used for File References or as the origin for a later generated preview. A saved preview outside the locked root is normal content but not source.
 
 Preview is blocked if:
 
@@ -616,7 +616,8 @@ Blocking notifications include counts when useful, for example:
 
 Re-running preview:
 
-- Refreshes the single preview buffer in place.
+- Refreshes the active Code Review-owned preview buffer in place.
+- If the prior preview was written to disk and detached, creates a fresh generated preview buffer.
 - If the existing preview has unsaved edits, replacement requires explicit confirmation.
 - Review Mode quit refuses to discard a modified preview buffer. It notifies the user to write or discard preview edits first.
 - Raw close paths such as `:bdelete`, `:confirm q`, or closing the preview window restore the origin content buffer when possible without replacing unrelated user content. If the origin cannot be restored and other content remains, Code Review leaves that content untouched, restores Review Mode state, and keeps the sidebar coherent.

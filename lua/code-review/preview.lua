@@ -78,6 +78,75 @@ local function restore_view(preview, win)
   end
 end
 
+local function preview_filename(buf)
+  return valid_buf(buf) and vim.api.nvim_buf_get_name(buf) or ""
+end
+
+local function detect_filetype(buf, name)
+  if not (vim.filetype and vim.filetype.match) then
+    return ""
+  end
+  local ok, filetype = pcall(vim.filetype.match, { buf = buf, filename = name })
+  if ok and filetype then
+    return filetype
+  end
+  return ""
+end
+
+local function clear_preview_autocmds(preview)
+  if not (preview and preview.autocmds) then
+    return
+  end
+  for _, id in ipairs(preview.autocmds) do
+    pcall(vim.api.nvim_del_autocmd, id)
+  end
+  preview.autocmds = nil
+end
+
+local function detach_saved_preview(preview)
+  local state = require("code-review.state")
+  local s = state.get()
+  if not (s.active and s.preview == preview and valid_buf(preview.buf)) then
+    return false
+  end
+  local name = preview_filename(preview.buf)
+  if name == "" then
+    return false
+  end
+
+  preview.detached = true
+  preview.promoting = false
+  clear_preview_autocmds(preview)
+  s.preview = nil
+  s.preview_restoring = false
+  if state.mode() == "preview" then
+    state.set_mode(previous_mode(preview))
+  end
+  pcall(vim.api.nvim_buf_del_var, preview.buf, "code_review_preview")
+  pcall(vim.api.nvim_buf_set_var, preview.buf, "code_review_detached_preview", true)
+  pcall(function()
+    if vim.bo[preview.buf].filetype == "code-review-preview" then
+      vim.bo[preview.buf].filetype = detect_filetype(preview.buf, name)
+    end
+    if vim.bo[preview.buf].bufhidden == "unload" then
+      vim.bo[preview.buf].bufhidden = ""
+    end
+  end)
+  require("code-review.sidebar").render()
+  require("code-review.highlights").refresh(preview.buf)
+  return true
+end
+
+local function rollback_preview_promotion(preview, session_id)
+  vim.schedule(function()
+    local state = require("code-review.state")
+    local s = state.get()
+    if s.active and s.session_id == session_id and s.preview == preview and not preview.detached then
+      preview.promoting = false
+    end
+  end)
+end
+
 local function restore_after_preview_closed(preview)
   local state = require("code-review.state")
   local s = state.get()
@@ -90,6 +159,7 @@ local function restore_after_preview_closed(preview)
   end
   local ok, err = pcall(function()
     s.preview = nil
+    clear_preview_autocmds(preview)
     state.set_mode(previous_mode(preview))
     local buf = origin_buffer(preview)
     local restored_win = nil
@@ -116,11 +186,11 @@ local function restore_after_preview_closed(preview)
   end
 end
 
-local function schedule_restore_if_preview_hidden(preview)
+local function schedule_preview_lifecycle_check(preview)
   vim.schedule(function()
     local state = require("code-review.state")
     local s = state.get()
-    if not s.active or s.tearing_down or s.preview ~= preview or preview.closing then
+    if not s.active or s.tearing_down or s.preview ~= preview or preview.closing or preview.promoting or preview.detached then
       return
     end
     if valid_buf(preview.buf) and preview_visible(preview.buf) then
@@ -132,7 +202,7 @@ local function schedule_restore_if_preview_hidden(preview)
 end
 
 function M.handle_window_closed(preview)
-  schedule_restore_if_preview_hidden(preview)
+  schedule_preview_lifecycle_check(preview)
 end
 
 function M.rollback_quit_attempt(preview, session_id, attempt_id)
@@ -259,7 +329,7 @@ function M.open(text, previous)
     else
       local target = navigation.find_preview_target_window(s.root)
       if not (target and valid_win(target) and navigation.content_window(target)) then
-        notify.warn("Open a content window before previewing.")
+        notify.warn("Open another content window before previewing.")
         return nil
       end
       for key, value in pairs(capture_origin(target, previous)) do
@@ -273,7 +343,7 @@ function M.open(text, previous)
   end
   local target_win = navigation.find_preview_target_window(s.root)
   if not (target_win and valid_win(target_win) and navigation.content_window(target_win)) then
-    notify.warn("Open a content window before previewing.")
+    notify.warn("Open another content window before previewing.")
     return nil
   end
   local origin = capture_origin(target_win, previous)
@@ -295,28 +365,50 @@ function M.open(text, previous)
       local s = state.get()
       if s.preview and s.preview.buf == buf then
         local preview = s.preview
-        if s.active and not preview.closing then
-          s.preview_restoring = true
-          vim.schedule(function()
-            restore_after_preview_closed(preview)
-          end)
+        if preview.promoting or preview.detached then
           return
         end
-        local mode = previous_mode(preview)
-        s.preview = nil
         if s.active then
-          state.set_mode(mode)
+          if preview.closing then
+            local mode = previous_mode(preview)
+            s.preview = nil
+            clear_preview_autocmds(preview)
+            state.set_mode(mode)
+          else
+            schedule_preview_lifecycle_check(preview)
+          end
         end
       end
     end,
   })
+  local preview_autocmds = {}
+  preview_autocmds[#preview_autocmds + 1] = vim.api.nvim_create_autocmd("BufWritePre", {
+    callback = function(args)
+      local state = require("code-review.state")
+      local s = state.get()
+      if s.preview and s.preview.buf == buf and not s.preview.detached and args.buf == buf then
+        s.preview.promoting = true
+        rollback_preview_promotion(s.preview, s.session_id)
+      end
+    end,
+  })
+  preview_autocmds[#preview_autocmds + 1] = vim.api.nvim_create_autocmd("BufWritePost", {
+    callback = function(args)
+      local state = require("code-review.state")
+      local s = state.get()
+      if s.preview and s.preview.buf == buf and not s.preview.detached and args.buf == buf then
+        detach_saved_preview(s.preview)
+      end
+    end,
+  })
+  s.preview.autocmds = preview_autocmds
   vim.api.nvim_create_autocmd("BufWinLeave", {
     buffer = buf,
     callback = function()
       local state = require("code-review.state")
       local s = state.get()
-      if s.preview and s.preview.buf == buf then
-        schedule_restore_if_preview_hidden(s.preview)
+      if s.preview and s.preview.buf == buf and not s.preview.promoting and not s.preview.detached then
+        schedule_preview_lifecycle_check(s.preview)
       end
     end,
   })
@@ -331,13 +423,17 @@ end
 function M.close()
   local state = require("code-review.state")
   local s = state.get()
-  if s.preview and s.preview.buf and vim.api.nvim_buf_is_valid(s.preview.buf) then
-    if vim.bo[s.preview.buf].modified then
+  local preview = s.preview
+  if preview and preview.buf and vim.api.nvim_buf_is_valid(preview.buf) then
+    if vim.bo[preview.buf].modified then
       notify.warn("Write or discard the modified Code Review preview before quitting.")
       return false
     end
-    s.preview.closing = true
-    pcall(vim.api.nvim_buf_delete, s.preview.buf, { force = true })
+    clear_preview_autocmds(preview)
+    preview.closing = true
+    pcall(vim.api.nvim_buf_delete, preview.buf, { force = true })
+  elseif preview then
+    clear_preview_autocmds(preview)
   end
   s.preview = nil
   return true

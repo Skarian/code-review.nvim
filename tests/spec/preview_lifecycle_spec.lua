@@ -57,6 +57,11 @@ describe("preview lifecycle", function()
     return nil
   end
 
+  local function autocmd_exists(id)
+    local ok, autocmds = pcall(vim.api.nvim_get_autocmds, { id = id })
+    return ok and #autocmds > 0
+  end
+
   local function layout_widths(state, source_buf)
     local widths = {}
     for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
@@ -195,23 +200,258 @@ describe("preview lifecycle", function()
     assert.is_false(vim.api.nvim_buf_is_valid(preview_buf))
   end)
 
-  it("keeps saved preview buffers out of source and reference actions", function()
+  it("detaches saved preview buffers into normal source buffers", function()
     local code_review, actions, state = make_complete_review()
     local navigation = require("code-review.navigation")
     local project = state.get().root
     actions.preview()
     local preview_buf = state.get().preview.buf
+    local preview_win = vim.api.nvim_get_current_win()
     local saved = project .. "/preview-output.md"
 
     vim.cmd("write " .. vim.fn.fnameescape(saved))
+    vim.wait(300, function()
+      return state.get().preview == nil and vim.api.nvim_win_get_buf(preview_win) == preview_buf
+    end)
 
-    assert.equals(saved, vim.api.nvim_buf_get_name(preview_buf))
+    assert.equals(nil, state.get().preview)
+    assert.equals("comment_list", state.mode())
+    assert.is_true(vim.api.nvim_buf_is_valid(preview_buf))
+    assert.is_true(vim.api.nvim_buf_is_loaded(preview_buf))
+    assert.equals(preview_buf, vim.api.nvim_win_get_buf(preview_win))
+    assert.truthy(vim.api.nvim_buf_get_name(preview_buf):find(vim.fn.fnamemodify(saved, ":t"), 1, true))
+    assert.equals(nil, vim.b[preview_buf].code_review_preview)
+    assert.is_true(vim.b[preview_buf].code_review_detached_preview)
+    assert.is_false(vim.bo[preview_buf].filetype == "code-review-preview")
+    assert.equals("", vim.bo[preview_buf].bufhidden)
+    assert.is_false(navigation.preview_buf(preview_buf))
     assert.is_true(navigation.content_buf(preview_buf))
-    assert.is_false(navigation.source_buf(preview_buf))
+    assert.is_true(navigation.source_buf(preview_buf))
     vim.fn.setpos("'<", { 0, 1, 1, 0 })
     vim.fn.setpos("'>", { 0, 1, 1, 0 })
     actions.add_reference()
-    assert.equals(nil, state.get().composer)
+    assert.truthy(state.get().composer)
+    require("code-review.composer").cancel()
+    code_review.quit()
+  end)
+
+  it("treats previews saved outside the root as normal non-source content", function()
+    local code_review, actions, state = make_complete_review()
+    local navigation = require("code-review.navigation")
+    actions.preview()
+    local preview_buf = state.get().preview.buf
+    local saved = vim.fn.fnamemodify(vim.fn.tempname() .. "-preview-output.md", ":p")
+
+    vim.cmd("write " .. vim.fn.fnameescape(saved))
+    vim.wait(300, function()
+      return state.get().preview == nil
+    end)
+
+    assert.truthy(vim.api.nvim_buf_get_name(preview_buf):find(vim.fn.fnamemodify(saved, ":t"), 1, true))
+    assert.is_false(navigation.preview_buf(preview_buf))
+    assert.is_true(navigation.content_buf(preview_buf))
+    assert.is_false(navigation.source_buf(preview_buf))
+    code_review.quit()
+  end)
+
+  it("does not delete detached saved previews when Review Mode quits", function()
+    local code_review, actions, state = make_complete_review()
+    actions.preview()
+    local preview_buf = state.get().preview.buf
+    local saved = state.get().root .. "/preview-output.md"
+
+    vim.cmd("write " .. vim.fn.fnameescape(saved))
+    vim.wait(300, function()
+      return state.get().preview == nil
+    end)
+    code_review.quit()
+
+    assert.is_false(code_review.is_active())
+    assert.is_true(vim.api.nvim_buf_is_valid(preview_buf))
+    assert.equals(saved, vim.api.nvim_buf_get_name(preview_buf))
+  end)
+
+  it("clears preview write autocmds even if the preview buffer was already deleted", function()
+    local code_review, actions, state = make_complete_review()
+    actions.preview()
+    local preview = state.get().preview
+    local autocmds = vim.deepcopy(preview.autocmds or {})
+
+    assert.equals(2, #autocmds)
+    vim.api.nvim_buf_delete(preview.buf, { force = true })
+    code_review.quit()
+    vim.wait(50, function()
+      return false
+    end)
+
+    for _, id in ipairs(autocmds) do
+      assert.is_false(autocmd_exists(id))
+    end
+  end)
+
+  it("keeps failed writes in the normal preview lifecycle", function()
+    local code_review, actions, state, _, source_buf = make_complete_review()
+    actions.preview()
+    local preview = state.get().preview
+    local preview_buf = preview.buf
+    local target = state.get().root .. "/missing/preview-output.md"
+    local ok = pcall(vim.cmd, "write " .. vim.fn.fnameescape(target))
+
+    vim.wait(300, function()
+      return not preview.promoting
+    end)
+
+    assert.is_false(ok)
+    assert.equals(0, vim.fn.filereadable(target))
+    assert.equals(preview, state.get().preview)
+    assert.equals("preview", state.mode())
+    assert.is_true(vim.b[preview_buf].code_review_preview)
+    assert.equals(nil, vim.b[preview_buf].code_review_detached_preview)
+    assert.equals("code-review-preview", vim.bo[preview_buf].filetype)
+    vim.api.nvim_set_current_buf(preview_buf)
+
+    vim.cmd.bdelete()
+    vim.wait(300, function()
+      return state.mode() == "comment_list" and vim.api.nvim_get_current_buf() == source_buf
+    end)
+
+    assert.equals(nil, state.get().preview)
+    assert.equals(source_buf, vim.api.nvim_get_current_buf())
+    code_review.quit()
+  end)
+
+  it("keeps failed saveas attempts in the normal preview lifecycle", function()
+    local code_review, actions, state, _, source_buf = make_complete_review()
+    actions.preview()
+    local preview = state.get().preview
+    local preview_buf = preview.buf
+    local target = state.get().root .. "/missing/saveas-preview-output.md"
+    local ok = pcall(vim.cmd, "saveas " .. vim.fn.fnameescape(target))
+
+    vim.wait(300, function()
+      return not preview.promoting
+    end)
+
+    assert.is_false(ok)
+    assert.equals(0, vim.fn.filereadable(target))
+    assert.equals(preview, state.get().preview)
+    assert.equals("preview", state.mode())
+    assert.is_true(vim.b[preview_buf].code_review_preview)
+    assert.equals(nil, vim.b[preview_buf].code_review_detached_preview)
+    assert.equals("code-review-preview", vim.bo[preview_buf].filetype)
+    vim.api.nvim_set_current_buf(preview_buf)
+
+    vim.cmd.bdelete()
+    vim.wait(300, function()
+      return state.mode() == "comment_list" and vim.api.nvim_get_current_buf() == source_buf
+    end)
+
+    assert.equals(nil, state.get().preview)
+    assert.equals(source_buf, vim.api.nvim_get_current_buf())
+    code_review.quit()
+  end)
+
+  it("does not treat file renames without writes as saved previews", function()
+    local code_review, actions, state, _, source_buf = make_complete_review()
+    actions.preview()
+    local preview = state.get().preview
+    local preview_buf = preview.buf
+    local target = state.get().root .. "/named-not-written.md"
+
+    vim.cmd("file " .. vim.fn.fnameescape(target))
+    assert.equals(target, vim.api.nvim_buf_get_name(preview_buf))
+    assert.equals(0, vim.fn.filereadable(target))
+    assert.equals(preview, state.get().preview)
+    assert.equals("preview", state.mode())
+    assert.is_true(vim.b[preview_buf].code_review_preview)
+    assert.equals(nil, vim.b[preview_buf].code_review_detached_preview)
+
+    vim.cmd.bdelete()
+    vim.wait(300, function()
+      return state.mode() == "comment_list" and vim.api.nvim_get_current_buf() == source_buf
+    end)
+
+    assert.equals(0, vim.fn.filereadable(target))
+    assert.equals(nil, state.get().preview)
+    assert.equals(source_buf, vim.api.nvim_get_current_buf())
+    code_review.quit()
+  end)
+
+  it("keeps append writes as export operations without detaching the preview", function()
+    local code_review, actions, state = make_complete_review()
+    actions.preview()
+    local preview = state.get().preview
+    local preview_buf = preview.buf
+    local target = state.get().root .. "/append-output.md"
+    vim.fn.writefile({ "existing" }, target)
+
+    local ok = pcall(vim.cmd, "write >> " .. vim.fn.fnameescape(target))
+    vim.wait(300, function()
+      return not preview.promoting
+    end)
+
+    assert.is_true(ok)
+    assert.equals(preview, state.get().preview)
+    assert.equals("preview", state.mode())
+    assert.equals("", vim.api.nvim_buf_get_name(preview_buf))
+    assert.is_true(vim.b[preview_buf].code_review_preview)
+    assert.equals(nil, vim.b[preview_buf].code_review_detached_preview)
+    assert.same({ "existing", "Review: Preview", "", "x.lua:1-1", "body", "" }, vim.fn.readfile(target))
+    code_review.quit()
+  end)
+
+  it("opens a fresh preview from a detached saved preview buffer", function()
+    local code_review, actions, state = make_complete_review()
+    actions.preview()
+    local saved_buf = state.get().preview.buf
+    local saved = state.get().root .. "/preview-output.md"
+
+    vim.cmd("write " .. vim.fn.fnameescape(saved))
+    vim.wait(300, function()
+      return state.get().preview == nil
+    end)
+
+    actions.preview()
+    local next_preview = state.get().preview.buf
+
+    assert.is_false(next_preview == saved_buf)
+    assert.equals(next_preview, vim.api.nvim_get_current_buf())
+    assert.equals(saved_buf, state.get().preview.origin_buf)
+    assert.equals(saved, vim.api.nvim_buf_get_name(saved_buf))
+    assert.equals("code-review-preview", vim.bo[next_preview].filetype)
+    assert.is_true(vim.b[next_preview].code_review_preview)
+    code_review.quit()
+  end)
+
+  it("uses the current detached saved preview as the next preview origin", function()
+    local code_review, actions, state, source_win = make_complete_review()
+    local project = state.get().root
+    vim.fn.writefile({ "y" }, project .. "/y.lua")
+    vim.cmd.vsplit(project .. "/y.lua")
+    local other_win = vim.api.nvim_get_current_win()
+    local other_buf = vim.api.nvim_get_current_buf()
+    vim.api.nvim_set_current_win(source_win)
+    actions.preview()
+    local saved_buf = state.get().preview.buf
+    local saved = project .. "/preview-output.md"
+
+    vim.cmd("write " .. vim.fn.fnameescape(saved))
+    vim.wait(300, function()
+      return state.get().preview == nil
+    end)
+    vim.api.nvim_set_current_win(other_win)
+    vim.api.nvim_set_current_win(win_for_buf(saved_buf))
+
+    actions.preview()
+    local next_preview = state.get().preview.buf
+
+    assert.is_false(next_preview == saved_buf)
+    assert.equals(next_preview, vim.api.nvim_win_get_buf(win_for_buf(next_preview)))
+    assert.equals(other_buf, vim.api.nvim_win_get_buf(other_win))
+    assert.equals(saved, vim.api.nvim_buf_get_name(saved_buf))
+    assert.equals("code-review-preview", vim.bo[next_preview].filetype)
+    assert.is_true(vim.b[next_preview].code_review_preview)
+    assert.equals(saved_buf, state.get().preview.origin_buf)
     code_review.quit()
   end)
 

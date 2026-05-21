@@ -11,6 +11,8 @@ It lets you collect short code review comments while staying in code buffers:
 - detect stale references; and
 - open an editable plain-text preview for handoff to an agent or another workflow.
 
+Preview opens as an editable unnamed buffer. Code Review owns it only while it remains unsaved; if you write it to a file, that buffer becomes a normal user file and future previews open in a fresh buffer. Append writes such as `:write >> file` export the text without naming the preview buffer, so the preview stays open and Code Review-owned.
+
 Review Mode is plugin state, not a native Neovim mode.
 
 ## Requirements
