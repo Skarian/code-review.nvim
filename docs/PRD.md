@@ -542,7 +542,7 @@ Behavior:
 
 ## Comment Editor
 
-The Comment Editor is the primary create/edit surface for Comments. It uses a stacked floating layout with a read-only status panel, a focusable read-only File References panel, and an editable comment buffer. Initial focus goes to the comment buffer. The comment buffer contains only body text; references, help, validation, and voice state are UI outside the editable body.
+The Comment Editor is the primary create/edit surface for Comments. It uses a stacked floating layout with a focusable read-only File References panel, an editable comment buffer, a display-only Voice panel, and a plain command legend. Initial focus goes to the comment buffer. The comment buffer contains only body text; references, help, validation, voice state, and command hints are UI outside the editable body.
 
 Composer buffer options:
 
@@ -554,12 +554,12 @@ Composer buffer options:
 Behavior:
 
 - Composer text edits update draft body text, not persisted Review data.
-- The status panel is not part of tab cycling.
+- The Voice panel and command legend are display-only and are not part of tab cycling.
 - `<Tab>` and `<S-Tab>` cycle between the references panel and comment buffer.
 - Normal `<CR>` submits the draft from the comment buffer. Insert-mode `<CR>` inserts a newline.
 - Normal `<CR>` on a draft File Reference opens a picker with `Delete` and `Go to`.
 - Normal `<leader>d` on a draft File Reference removes that draft reference.
-- `Go to` closes the Comment Editor and jumps the source window to that File Reference.
+- `Go to` jumps the source window to that File Reference and keeps the Comment Editor open.
 - Normal `q` and Normal `<Esc>` cancel from composer sections.
 - Normal `<leader><Space>` toggles voice recording.
 - Normal `?` opens read-only Comment Editor help; `q` and `<Esc>` close help without canceling the Comment Editor.

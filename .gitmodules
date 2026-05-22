@@ -1,0 +1,3 @@
+[submodule "references/spinner.nvim"]
+	path = references/spinner.nvim
+	url = https://github.com/xieyonn/spinner.nvim

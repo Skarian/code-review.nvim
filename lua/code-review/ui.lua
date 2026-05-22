@@ -82,49 +82,158 @@ local function open_float(buf, opts)
     style = "minimal",
     border = opts.border or "rounded",
     title = opts.title,
+    title_pos = opts.title and "left" or nil,
     focusable = opts.focusable ~= false,
   })
 end
 
+local function composer_layout()
+  local columns = math.max(1, vim.o.columns)
+  local lines = math.max(8, vim.o.lines)
+  local available_width = math.max(1, columns - 2)
+  local width = math.min(92, available_width, math.max(40, math.floor(columns * 0.66)))
+  local gap = 0
+  local refs_height = lines >= 18 and 4 or 1
+  local voice_height = 1
+  local legend_height = lines >= 24 and 3 or (lines >= 18 and 2 or 1)
+  local refs_outer = refs_height + 2
+  local body_border = 2
+  local voice_outer = voice_height + 2
+  local function total_height_for(body_height)
+    return refs_height + 2 + body_height + body_border + voice_height + 2 + legend_height + gap * 3
+  end
+  while total_height_for(1) > lines and gap > 0 do
+    gap = gap - 1
+  end
+  while total_height_for(1) > lines and legend_height > 1 do
+    legend_height = legend_height - 1
+  end
+  while total_height_for(1) > lines and refs_height > 1 do
+    refs_height = refs_height - 1
+  end
+  while total_height_for(1) > lines and voice_height > 1 do
+    voice_height = voice_height - 1
+  end
+  refs_outer = refs_height + 2
+  voice_outer = voice_height + 2
+  local fixed_height = refs_outer + body_border + voice_outer + legend_height + gap * 3
+  local body_height = math.max(1, lines - fixed_height)
+  body_height = math.min(16, body_height)
+  local body_outer = body_height + body_border
+  local total_height = refs_outer + body_outer + voice_outer + legend_height + gap * 3
+  local row = math.max(0, math.floor((lines - total_height) / 2))
+  local col = math.max(0, math.floor((columns - width - 2) / 2))
+  return {
+    width = width,
+    col = col,
+    refs = { row = row, height = refs_height, border = "rounded", title = " References ", focusable = true },
+    body = {
+      row = row + refs_outer + gap,
+      height = body_height,
+      border = "rounded",
+      title = " Comment ",
+      focusable = true,
+    },
+    voice = {
+      row = row + refs_outer + body_outer + gap * 2,
+      height = voice_height,
+      border = "rounded",
+      title = " Voice ",
+      focusable = false,
+    },
+    legend = {
+      row = row + refs_outer + body_outer + voice_outer + gap * 3,
+      height = legend_height,
+      border = "none",
+      focusable = false,
+    },
+  }
+end
+
+local function float_config(layout, spec)
+  local borderless = spec.border == "none"
+  return {
+    relative = "editor",
+    row = spec.row,
+    col = layout.col,
+    width = borderless and layout.width + 2 or layout.width,
+    height = spec.height,
+    style = "minimal",
+    border = spec.border,
+    title = spec.title,
+    title_pos = spec.title and "left" or nil,
+    focusable = spec.focusable,
+  }
+end
+
+local function composer_panes(handle)
+  return {
+    { buf = handle.refs_buf, win = handle.refs_win },
+    { buf = handle.body_buf, win = handle.body_win },
+    { buf = handle.voice_buf, win = handle.voice_win },
+    { buf = handle.legend_buf, win = handle.legend_win },
+  }
+end
+
+function M.layout_composer_stack(handle)
+  if not handle then
+    return
+  end
+  local layout = composer_layout()
+  local specs = {
+    { win = handle.refs_win, spec = layout.refs },
+    { win = handle.body_win, spec = layout.body },
+    { win = handle.voice_win, spec = layout.voice },
+    { win = handle.legend_win, spec = layout.legend },
+  }
+  for _, item in ipairs(specs) do
+    if item.win and vim.api.nvim_win_is_valid(item.win) then
+      pcall(vim.api.nvim_win_set_config, item.win, float_config(layout, item.spec))
+    end
+  end
+end
+
 function M.open_composer_stack(body_lines)
-  local width = math.min(92, math.max(60, math.floor(vim.o.columns * 0.66)))
-  local body_height = math.min(16, math.max(8, math.floor(vim.o.lines * 0.32)))
-  local refs_height = 4
-  local status_height = 2
-  local gap = 2
-  local total_height = status_height + refs_height + body_height + gap * 2
-  local row = math.max(0, math.floor((vim.o.lines - total_height) / 2) - 1)
-  local col = math.max(0, math.floor((vim.o.columns - width) / 2))
-  local status_buf = make_float_buf("Code Review Composer Status", {}, false)
+  local layout = composer_layout()
   local refs_buf = make_float_buf("Code Review Composer References", {}, false)
   local body_buf = make_float_buf("Code Review Comment", body_lines or { "" }, true)
+  local voice_buf = make_float_buf("Code Review Composer Voice", {}, false)
+  local legend_buf = make_float_buf("Code Review Composer Legend", {}, false)
 
-  local status_win = open_float(status_buf, {
-    row = row,
-    col = col,
-    width = width,
-    height = status_height,
-    title = " Code Review ",
-    focusable = true,
-  })
   local refs_win = open_float(refs_buf, {
-    row = row + status_height + gap,
-    col = col,
-    width = width,
-    height = refs_height,
-    title = " References ",
-    focusable = true,
+    row = layout.refs.row,
+    col = layout.col,
+    width = layout.width,
+    height = layout.refs.height,
+    title = layout.refs.title,
+    focusable = layout.refs.focusable,
   })
   local body_win = open_float(body_buf, {
-    row = row + status_height + refs_height + gap * 2,
-    col = col,
-    width = width,
-    height = body_height,
-    title = " Comment ",
-    focusable = true,
+    row = layout.body.row,
+    col = layout.col,
+    width = layout.width,
+    height = layout.body.height,
+    title = layout.body.title,
+    focusable = layout.body.focusable,
     enter = true,
   })
-  for _, win in ipairs({ status_win, refs_win, body_win }) do
+  local voice_win = open_float(voice_buf, {
+    row = layout.voice.row,
+    col = layout.col,
+    width = layout.width,
+    height = layout.voice.height,
+    title = layout.voice.title,
+    focusable = layout.voice.focusable,
+  })
+  local legend_win = open_float(legend_buf, {
+    row = layout.legend.row,
+    col = layout.col,
+    width = layout.width + 2,
+    height = layout.legend.height,
+    border = layout.legend.border,
+    focusable = layout.legend.focusable,
+  })
+  for _, win in ipairs({ refs_win, body_win, voice_win, legend_win }) do
     vim.wo[win].number = false
     vim.wo[win].relativenumber = false
     vim.wo[win].signcolumn = "no"
@@ -134,21 +243,24 @@ function M.open_composer_stack(body_lines)
   vim.wo[body_win].linebreak = true
   vim.wo[body_win].breakindent = true
   vim.wo[body_win].spell = true
-  return {
-    status_buf = status_buf,
-    status_win = status_win,
+  local handle = {
     refs_buf = refs_buf,
     refs_win = refs_win,
     body_buf = body_buf,
     body_win = body_win,
+    voice_buf = voice_buf,
+    voice_win = voice_win,
+    legend_buf = legend_buf,
+    legend_win = legend_win,
     close = function(self)
-      for _, win in ipairs({ self.status_win, self.refs_win, self.body_win }) do
-        if win and vim.api.nvim_win_is_valid(win) then
-          pcall(vim.api.nvim_win_close, win, true)
+      for _, pane in ipairs(composer_panes(self)) do
+        if pane.win and vim.api.nvim_win_is_valid(pane.win) then
+          pcall(vim.api.nvim_win_close, pane.win, true)
         end
       end
     end,
   }
+  return handle
 end
 
 function M.open_help(opts)

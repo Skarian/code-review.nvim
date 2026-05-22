@@ -8,6 +8,32 @@ local storage = require("code-review.storage")
 local ui = require("code-review.ui")
 
 local M = {}
+-- Frames copied from xieyonn/spinner.nvim's dotsCircle and dots14 patterns.
+local recording_frames = {
+  "⢎ ",
+  "⠎⠁",
+  "⠊⠑",
+  "⠈⠱",
+  " ⡱",
+  "⢀⡰",
+  "⢄⡠",
+  "⢆⡀",
+}
+local transcribing_frames = {
+  "⠉⠉",
+  "⠈⠙",
+  "⠀⠹",
+  "⠀⢸",
+  "⠀⣰",
+  "⢀⣠",
+  "⣀⣀",
+  "⣄⡀",
+  "⣆⠀",
+  "⡇⠀",
+  "⠏⠀",
+  "⠋⠁",
+}
+local spinner_interval_ms = 80
 
 local function valid_win(win)
   return win and vim.api.nvim_win_is_valid(win)
@@ -58,21 +84,21 @@ local function voice_available()
   return vim.fn.filereadable(helper) == 1
 end
 
-local function voice_status_line()
+local function voice_status_label()
   local s = state.get()
   if s.mode == "recording" then
-    return "Recording: press <leader><Space> to stop"
+    return "Recording"
   end
   if s.mode == "transcribing" then
-    return "Transcribing audio..."
+    return "Transcribing"
   end
   if s.mode == "voice_error_pending" then
-    return "Voice failed: press <leader><Space> to retry"
+    return "Failed"
   end
   if not voice_available() then
-    return "Voice: unavailable"
+    return "Unavailable"
   end
-  return "Voice ready: press <leader><Space> to record"
+  return "Ready"
 end
 
 local function refresh_draft_highlights()
@@ -99,10 +125,97 @@ local function current_ref_index(composer)
   return row
 end
 
-local function status_lines(composer)
+local function voice_active()
+  local mode = state.mode()
+  return mode == "recording" or mode == "transcribing"
+end
+
+local function active_voice_frames()
+  local mode = state.mode()
+  if mode == "recording" then
+    return recording_frames
+  end
+  if mode == "transcribing" then
+    return transcribing_frames
+  end
+end
+
+local function voice_prefix(composer)
+  local frames = active_voice_frames()
+  if frames then
+    return frames[((composer.spinner_frame or 1) - 1) % #frames + 1]
+  end
+  if state.mode() == "voice_error_pending" then
+    return "× "
+  end
+  if not voice_available() then
+    return "! "
+  end
+  return "○ "
+end
+
+local function center_lines(lines, width)
+  local centered = {}
+  for _, line in ipairs(lines) do
+    local padding = math.max(0, math.floor((width - vim.fn.strdisplaywidth(line)) / 2))
+    centered[#centered + 1] = string.rep(" ", padding) .. line
+  end
+  return centered
+end
+
+local function voice_lines(composer)
+  local label = voice_status_label()
+  local line = voice_prefix(composer) .. " " .. label
+  if valid_win(composer.voice_win) then
+    line = center_lines({ line }, vim.api.nvim_win_get_width(composer.voice_win))[1]
+  end
+  return { line }
+end
+
+local function legend_lines(composer)
+  local width = valid_win(composer.legend_win) and vim.api.nvim_win_get_width(composer.legend_win) or 92
+  local height = valid_win(composer.legend_win) and vim.api.nvim_win_get_height(composer.legend_win) or 3
+  if height <= 1 then
+    if width >= 32 then
+      return { "Enter submit | q cancel | ? help" }
+    end
+    return { "Enter | q | ?" }
+  end
+  if width >= 58 then
+    return {
+      "Enter submit | <leader><Space> voice | <leader>d delete",
+      "q cancel | Tab switch panels | ? help",
+    }
+  end
+  if width < 37 then
+    if height <= 2 then
+      if width >= 20 then
+        return {
+          "Enter submit | voice",
+          "delete | q | ?",
+        }
+      end
+      return {
+        "Enter | voice",
+        "delete | q | ?",
+      }
+    end
+    return {
+      "Enter submit",
+      "voice | delete",
+      "q cancel | ? help",
+    }
+  end
+  if height <= 2 then
+    return {
+      "Enter submit | <leader><Space> voice",
+      "<leader>d delete | q cancel | ? help",
+    }
+  end
   return {
-    "Enter submit | <leader><Space> voice | <leader>d delete | q cancel | Tab switch panels | ? help",
-    voice_status_line(),
+    "Enter submit | <leader><Space> voice",
+    "<leader>d delete | q cancel",
+    "Tab switch panels | ? help",
   }
 end
 
@@ -117,13 +230,68 @@ local function reference_lines(composer)
   return lines
 end
 
+local function stop_spinner(composer)
+  if composer and composer.spinner_timer then
+    pcall(composer.spinner_timer.stop, composer.spinner_timer)
+    pcall(composer.spinner_timer.close, composer.spinner_timer)
+    composer.spinner_timer = nil
+  end
+end
+
+local function render_voice(composer)
+  set_readonly_lines(composer.voice_buf, voice_lines(composer))
+end
+
+local function sync_spinner(composer)
+  if not composer then
+    return
+  end
+  if not voice_active() then
+    stop_spinner(composer)
+    composer.spinner_frame = 1
+    render_voice(composer)
+    return
+  end
+  composer.spinner_frame = composer.spinner_frame or 1
+  if composer.spinner_timer then
+    render_voice(composer)
+    return
+  end
+  local session_id = state.get().session_id
+  local timer = vim.loop.new_timer()
+  composer.spinner_timer = timer
+  timer:start(0, spinner_interval_ms, function()
+    vim.schedule(function()
+      local current = state.get().composer
+      if current ~= composer or state.get().session_id ~= session_id or not valid_buf(composer.voice_buf) then
+        stop_spinner(composer)
+        return
+      end
+      if not voice_active() then
+        stop_spinner(composer)
+        composer.spinner_frame = 1
+        render_voice(composer)
+        return
+      end
+      local frames = active_voice_frames()
+      composer.spinner_frame = ((composer.spinner_frame or 1) % #frames) + 1
+      render_voice(composer)
+    end)
+  end)
+  render_voice(composer)
+end
+
 function M.refresh()
   local composer = state.get().composer
   if not composer then
     return
   end
-  set_readonly_lines(composer.status_buf, status_lines(composer))
   set_readonly_lines(composer.refs_buf, reference_lines(composer))
+  do
+    local width = valid_win(composer.legend_win) and vim.api.nvim_win_get_width(composer.legend_win) or 92
+    set_readonly_lines(composer.legend_buf, center_lines(legend_lines(composer), width))
+  end
+  sync_spinner(composer)
 end
 
 local function focus_section(section)
@@ -154,11 +322,12 @@ local function cycle_focus(reverse)
 end
 
 local function close_windows(composer)
+  stop_spinner(composer)
   if composer.handle and type(composer.handle.close) == "function" then
     pcall(composer.handle.close, composer.handle)
     return
   end
-  for _, win in ipairs({ composer.status_win, composer.refs_win, composer.body_win }) do
+  for _, win in ipairs({ composer.refs_win, composer.body_win, composer.voice_win, composer.legend_win }) do
     if valid_win(win) then
       pcall(vim.api.nvim_win_close, win, true)
     end
@@ -174,9 +343,13 @@ local function clear_composer(delete_buf)
   if s.voice then
     pcall(require("code-review.voice").stop)
   end
+  if composer.resize_autocmd then
+    pcall(vim.api.nvim_del_autocmd, composer.resize_autocmd)
+    composer.resize_autocmd = nil
+  end
   close_windows(composer)
   if delete_buf then
-    for _, buf in ipairs({ composer.status_buf, composer.refs_buf, composer.body_buf }) do
+    for _, buf in ipairs({ composer.refs_buf, composer.body_buf, composer.voice_buf, composer.legend_buf }) do
       if valid_buf(buf) then
         pcall(vim.api.nvim_buf_delete, buf, { force = true })
       end
@@ -358,16 +531,18 @@ local function open(opts)
     body_win = handle.body_win,
     refs_buf = handle.refs_buf,
     refs_win = handle.refs_win,
-    status_buf = handle.status_buf,
-    status_win = handle.status_win,
+    voice_buf = handle.voice_buf,
+    voice_win = handle.voice_win,
+    legend_buf = handle.legend_buf,
+    legend_win = handle.legend_win,
     handle = handle,
     source_win = source_win,
     active_section = "body",
     references = vim.deepcopy(opts.references or {}),
     target_comment_id = opts.target_comment_id,
+    spinner_frame = 1,
   }
   s.composer = composer
-  apply_common_keymaps(composer.status_buf)
   apply_body_keymaps(composer.body_buf)
   apply_refs_keymaps(composer.refs_buf)
   vim.api.nvim_create_autocmd("BufWipeout", {
@@ -383,6 +558,15 @@ local function open(opts)
     callback = function()
       local current = state.get().composer
       if current and current.body_buf == composer.body_buf then
+        M.refresh()
+      end
+    end,
+  })
+  composer.resize_autocmd = vim.api.nvim_create_autocmd("VimResized", {
+    callback = function()
+      local current = state.get().composer
+      if current and current.body_buf == composer.body_buf then
+        ui.layout_composer_stack(composer.handle)
         M.refresh()
       end
     end,
@@ -492,17 +676,17 @@ function M.show_help()
     "File References",
     "  Key          Action",
     "  Enter        Open actions for the focused reference",
-    "               Delete removes it; Go to closes the editor and jumps to the source line",
+    "               Delete removes it; Go to jumps the source window to that line",
     "  <leader>d   Delete the focused reference",
     "",
     "Submitting and cancelling",
     "  Submit requires comment text and at least one File Reference",
     "",
     "Voice Dictation",
-    "  Ready         Press <leader><Space> to start recording",
-    "  Recording     Press <leader><Space> to stop recording and transcribe",
-    "  Transcribing  Wait for text to be inserted at the comment cursor",
-    "  Failed        Press <leader><Space> to retry, or cancel to discard the voice state",
+    "  Ready         Voice is ready",
+    "  Recording     Voice is recording",
+    "  Transcribing  Voice is being transcribed",
+    "  Failed        Voice dictation failed; the notification explains what happened",
   })
 end
 

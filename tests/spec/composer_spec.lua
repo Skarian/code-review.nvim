@@ -23,13 +23,87 @@ describe("comment composer", function()
     return table.concat(vim.api.nvim_buf_get_lines(composer.buf, 0, -1, false), "\n")
   end
 
-  local function status_text(composer)
-    return table.concat(vim.api.nvim_buf_get_lines(composer.status_buf, 0, -1, false), "\n")
-  end
-
   local function refs_text(composer)
     return table.concat(vim.api.nvim_buf_get_lines(composer.refs_buf, 0, -1, false), "\n")
   end
+
+  local function voice_text(composer)
+    return table.concat(vim.api.nvim_buf_get_lines(composer.voice_buf, 0, -1, false), "\n")
+  end
+
+  local function legend_text(composer)
+    return table.concat(vim.api.nvim_buf_get_lines(composer.legend_buf, 0, -1, false), "\n")
+  end
+
+  local recording_frames = {
+    "⢎ ",
+    "⠎⠁",
+    "⠊⠑",
+    "⠈⠱",
+    " ⡱",
+    "⢀⡰",
+    "⢄⡠",
+    "⢆⡀",
+  }
+
+  local transcribing_frames = {
+    "⠉⠉",
+    "⠈⠙",
+    "⠀⠹",
+    "⠀⢸",
+    "⠀⣰",
+    "⢀⣠",
+    "⣀⣀",
+    "⣄⡀",
+    "⣆⠀",
+    "⡇⠀",
+    "⠏⠀",
+    "⠋⠁",
+  }
+
+  local function voice_status_lines(composer)
+    local lines = vim.api.nvim_buf_get_lines(composer.voice_buf, 0, -1, false)
+    local status = {}
+    for index, line in ipairs(lines) do
+      if line:match("%S") then
+        status[#status + 1] = { index = index, line = line }
+      end
+    end
+    assert.equals(1, #status)
+    return lines, status[1]
+  end
+
+  local function assert_voice_centered(composer, rendered, expected)
+    local width = vim.api.nvim_win_get_width(composer.voice_win)
+    local start_col = rendered.line:find(expected, 1, true)
+    assert.truthy(start_col)
+    local left_padding = start_col - 1
+    local right_padding = width - left_padding - vim.fn.strdisplaywidth(expected)
+    assert.is_true(math.abs(left_padding - right_padding) <= 1)
+    assert.equals(1, rendered.index)
+    assert.is_true(vim.fn.strdisplaywidth(rendered.line) <= width)
+  end
+
+  local function assert_voice_line(composer, expected)
+    local lines, rendered = voice_status_lines(composer)
+    assert.is_true(#lines <= vim.api.nvim_win_get_height(composer.voice_win))
+    assert_voice_centered(composer, rendered, expected)
+  end
+
+  local function assert_voice_frame_line(composer, frames, label)
+    local lines, rendered = voice_status_lines(composer)
+    assert.is_true(#lines <= vim.api.nvim_win_get_height(composer.voice_win))
+    for _, frame in ipairs(frames) do
+      assert.equals(2, vim.fn.strdisplaywidth(frame))
+      local expected = frame .. " " .. label
+      if rendered.line:find(expected, 1, true) then
+        assert_voice_centered(composer, rendered, expected)
+        return
+      end
+    end
+    error("voice line did not use expected " .. label .. " frame: " .. rendered.line)
+  end
+
 
   local function get_normal_map(buf, lhs)
     local normalized = vim.api.nvim_replace_termcodes(lhs, true, true, true)
@@ -42,6 +116,69 @@ describe("comment composer", function()
 
   local function has_normal_map(buf, lhs)
     return get_normal_map(buf, lhs) ~= nil
+  end
+
+  local function assert_display_pane(composer, pane)
+    local buf = composer[pane .. "_buf"]
+    local win = composer[pane .. "_win"]
+    assert.is_true(vim.api.nvim_buf_is_valid(buf))
+    assert.is_true(vim.api.nvim_win_is_valid(win))
+    assert.is_false(vim.api.nvim_win_get_config(win).focusable)
+    assert.is_false(vim.bo[buf].modifiable)
+    assert.same({}, vim.api.nvim_buf_get_keymap(buf, "n"))
+  end
+
+  local function assert_ordered_layout(composer)
+    local order = { "refs_win", "body_win", "voice_win", "legend_win" }
+    local previous_bottom = -1
+    for _, key in ipairs(order) do
+      local win = composer[key]
+      assert.is_true(vim.api.nvim_win_is_valid(win))
+      local cfg = vim.api.nvim_win_get_config(win)
+      local border_extra = key == "legend_win" and 0 or 2
+      assert.equals("editor", cfg.relative)
+      assert.is_true(cfg.width > 0)
+      assert.is_true(cfg.height > 0)
+      assert.is_true(cfg.row >= 0)
+      assert.is_true(cfg.col >= 0)
+      assert.is_true(cfg.row + cfg.height + border_extra <= vim.o.lines)
+      assert.is_true(cfg.col + cfg.width + border_extra <= vim.o.columns)
+      if key == "legend_win" then
+        local body_cfg = vim.api.nvim_win_get_config(composer.body_win)
+        assert.equals(body_cfg.col, cfg.col)
+        assert.equals(body_cfg.width + 2, cfg.width)
+      end
+      assert.is_true(cfg.row > previous_bottom)
+      previous_bottom = cfg.row + cfg.height + border_extra - 1
+    end
+  end
+
+  local function assert_voice_title(composer)
+    assert.truthy(vim.inspect(vim.api.nvim_win_get_config(composer.voice_win).title):find("Voice", 1, true))
+  end
+
+  local function assert_legend_fits(composer)
+    local width = vim.api.nvim_win_get_width(composer.legend_win)
+    for _, line in ipairs(vim.api.nvim_buf_get_lines(composer.legend_buf, 0, -1, false)) do
+      assert.is_true(vim.fn.strdisplaywidth(line) <= width)
+    end
+  end
+
+  local function assert_voice_fits(composer)
+    local width = vim.api.nvim_win_get_width(composer.voice_win)
+    for _, line in ipairs(vim.api.nvim_buf_get_lines(composer.voice_buf, 0, -1, false)) do
+      assert.is_true(vim.fn.strdisplaywidth(line) <= width)
+    end
+  end
+
+  local function assert_legend_centered(composer)
+    local width = vim.api.nvim_win_get_width(composer.legend_win)
+    for _, line in ipairs(vim.api.nvim_buf_get_lines(composer.legend_buf, 0, -1, false)) do
+      local text = vim.trim(line)
+      local expected_padding = math.floor((width - vim.fn.strdisplaywidth(text)) / 2)
+      local actual_padding = #(line:match("^ *") or "")
+      assert.is_true(math.abs(actual_padding - expected_padding) <= 1)
+    end
   end
 
   it("accepts Snacks.win when it is a callable table", function()
@@ -104,12 +241,20 @@ describe("comment composer", function()
     local composer = state.get().composer
     assert.equals(composer.body_buf, vim.api.nvim_get_current_buf())
     assert.equals(composer.body_win, vim.api.nvim_get_current_win())
+    assert.equals(composer.body_buf, composer.buf)
+    assert.equals(composer.body_win, composer.win)
+    assert.equals(nil, composer.status_buf)
+    assert.equals(nil, composer.status_win)
     assert.equals("", composer_text(composer))
-    assert.truthy(status_text(composer):find("Tab switch panels", 1, true))
-    assert.truthy(status_text(composer):find("<leader><Space> voice", 1, true))
-    assert.truthy(status_text(composer):find("<leader>d delete", 1, true))
-    assert.truthy(status_text(composer):find("Voice: unavailable", 1, true))
+    assert.truthy(legend_text(composer):find("Tab switch panels", 1, true))
+    assert.truthy(legend_text(composer):find("<leader><Space> voice", 1, true))
+    assert.truthy(legend_text(composer):find("<leader>d delete", 1, true))
+    assert_voice_line(composer, "!  Unavailable")
     assert.truthy(refs_text(composer):find("x.lua:1-1", 1, true))
+    assert_display_pane(composer, "voice")
+    assert_display_pane(composer, "legend")
+    assert_ordered_layout(composer)
+    assert_voice_title(composer)
     vim.api.nvim_buf_set_lines(composer.body_buf, 0, -1, false, { "body" })
     require("code-review.composer").submit()
     local review = require("code-review.model").find_review(state.get().store, state.get().active_review_id)
@@ -297,23 +442,24 @@ describe("comment composer", function()
     assert.is_true(has_normal_map(composer.refs_buf, "<Leader>d"))
     assert.is_true(has_normal_map(composer.body_buf, "<Leader><Space>"))
     assert.is_true(has_normal_map(composer.refs_buf, "<Leader><Space>"))
-    assert.is_true(has_normal_map(composer.status_buf, "<Leader><Space>"))
     assert.is_true(has_normal_map(composer.body_buf, "q"))
     assert.is_true(has_normal_map(composer.refs_buf, "q"))
-    assert.is_true(has_normal_map(composer.status_buf, "q"))
     assert.is_true(has_normal_map(composer.body_buf, "<Esc>"))
     assert.is_true(has_normal_map(composer.refs_buf, "<Esc>"))
-    assert.is_true(has_normal_map(composer.status_buf, "<Esc>"))
     assert.is_true(has_normal_map(composer.body_buf, "<Leader>q"))
     assert.is_true(has_normal_map(composer.refs_buf, "<Leader>q"))
-    assert.is_true(has_normal_map(composer.status_buf, "<Leader>q"))
+    assert.is_true(has_normal_map(composer.body_buf, "?"))
+    assert.is_true(has_normal_map(composer.refs_buf, "?"))
+    assert.is_true(has_normal_map(composer.body_buf, "<Tab>"))
+    assert.is_true(has_normal_map(composer.refs_buf, "<Tab>"))
+    assert.is_true(has_normal_map(composer.body_buf, "<S-Tab>"))
+    assert.is_true(has_normal_map(composer.refs_buf, "<S-Tab>"))
     assert.is_false(has_normal_map(composer.body_buf, "<Space>"))
     assert.is_false(has_normal_map(composer.refs_buf, "<Space>"))
-    assert.is_false(has_normal_map(composer.status_buf, "<Space>"))
     assert.is_false(has_normal_map(composer.body_buf, "d"))
     assert.is_false(has_normal_map(composer.refs_buf, "d"))
-    assert.is_false(has_normal_map(composer.status_buf, "d"))
-    assert.is_false(has_normal_map(composer.status_buf, "<Leader>d"))
+    assert.same({}, vim.api.nvim_buf_get_keymap(composer.voice_buf, "n"))
+    assert.same({}, vim.api.nvim_buf_get_keymap(composer.legend_buf, "n"))
     require("code-review.composer").cancel()
     code_review.quit()
   end)
@@ -339,7 +485,7 @@ describe("comment composer", function()
 
   it("maps common quit keys on every composer pane to cancel the whole composer", function()
     for _, lhs in ipairs({ "q", "<Leader>q", "<Esc>" }) do
-      for _, pane in ipairs({ "body_buf", "refs_buf", "status_buf" }) do
+      for _, pane in ipairs({ "body_buf", "refs_buf" }) do
         local code_review, actions, state = start_project()
         select_lines(actions, 1, 1)
         local composer = state.get().composer
@@ -348,7 +494,8 @@ describe("comment composer", function()
         assert.equals(nil, state.get().composer)
         assert.is_false(vim.api.nvim_buf_is_valid(composer.body_buf))
         assert.is_false(vim.api.nvim_buf_is_valid(composer.refs_buf))
-        assert.is_false(vim.api.nvim_buf_is_valid(composer.status_buf))
+        assert.is_false(vim.api.nvim_buf_is_valid(composer.voice_buf))
+        assert.is_false(vim.api.nvim_buf_is_valid(composer.legend_buf))
         code_review.quit()
       end
     end
@@ -429,12 +576,12 @@ describe("comment composer", function()
     assert.truthy(text:find("Submitting and cancelling", 1, true))
     assert.truthy(text:find("Voice Dictation", 1, true))
     assert.truthy(text:find("Open actions for the focused reference", 1, true))
-    assert.truthy(text:find("Delete removes it; Go to closes the editor and jumps to the source line", 1, true))
+    assert.truthy(text:find("Delete removes it; Go to jumps the source window to that line", 1, true))
     assert.truthy(text:find("<leader>d   Delete the focused reference", 1, true))
     assert.truthy(text:find("<leader>d   Delete the whole comment or draft", 1, true))
     assert.truthy(text:find("<leader><Space> Start, stop, or retry voice recording", 1, true))
     assert.truthy(text:find("Submit requires comment text and at least one File Reference", 1, true))
-    assert.truthy(text:find("Transcribing  Wait for text to be inserted at the comment cursor", 1, true))
+    assert.truthy(text:find("Transcribing  Voice is being transcribed", 1, true))
     local maps = vim.api.nvim_buf_get_keymap(buf, "n")
     local seen_q, seen_esc = false, false
     for _, map in ipairs(maps) do
@@ -454,21 +601,92 @@ describe("comment composer", function()
     code_review.quit()
   end)
 
-  it("cycles focus between references and body while skipping status", function()
+  it("cycles focus between references and body while skipping display panes", function()
     local code_review, actions, state = start_project()
     select_lines(actions, 1, 1)
     local composer = state.get().composer
     assert.equals(composer.body_win, vim.api.nvim_get_current_win())
-    assert.is_true(vim.api.nvim_win_get_config(composer.status_win).focusable)
+    assert.is_false(vim.api.nvim_win_get_config(composer.voice_win).focusable)
+    assert.is_false(vim.api.nvim_win_get_config(composer.legend_win).focusable)
     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Tab>", true, false, true), "x", false)
     assert.equals(composer.refs_win, vim.api.nvim_get_current_win())
     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Tab>", true, false, true), "x", false)
     assert.equals(composer.body_win, vim.api.nvim_get_current_win())
     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<S-Tab>", true, false, true), "x", false)
     assert.equals(composer.refs_win, vim.api.nvim_get_current_win())
-    assert.is_false(composer.status_win == vim.api.nvim_get_current_win())
+    assert.is_false(composer.voice_win == vim.api.nvim_get_current_win())
+    assert.is_false(composer.legend_win == vim.api.nvim_get_current_win())
     require("code-review.composer").cancel()
     code_review.quit()
+  end)
+
+  it("keeps composer panes ordered and in bounds at constrained sizes", function()
+    local old_columns = vim.o.columns
+    local old_lines = vim.o.lines
+    local code_review
+    local ok, err = pcall(function()
+      vim.o.columns = 80
+      vim.o.lines = 24
+      local actions, state
+      code_review, actions, state = start_project()
+      select_lines(actions, 1, 1)
+      local composer = state.get().composer
+      assert_ordered_layout(composer)
+      for _, size in ipairs({
+        { columns = 50, lines = 12 },
+        { columns = 80, lines = 18 },
+        { columns = 80, lines = 20 },
+        { columns = 80, lines = 21 },
+        { columns = 24, lines = 18 },
+        { columns = 24, lines = 24 },
+        { columns = 36, lines = 18 },
+        { columns = 36, lines = 24 },
+        { columns = 50, lines = 18 },
+        { columns = 50, lines = 20 },
+        { columns = 50, lines = 21 },
+      }) do
+        vim.o.columns = size.columns
+        vim.o.lines = size.lines
+        vim.cmd("doautocmd VimResized")
+        assert_ordered_layout(composer)
+        assert.truthy(legend_text(composer):find("Enter submit", 1, true))
+        assert.truthy(voice_text(composer):find("Ready", 1, true) or voice_text(composer):find("Unavailable", 1, true))
+            assert.is_true(#vim.api.nvim_buf_get_lines(composer.legend_buf, 0, -1, false) <= vim.api.nvim_win_get_height(composer.legend_win))
+        assert.is_true(#vim.api.nvim_buf_get_lines(composer.voice_buf, 0, -1, false) <= vim.api.nvim_win_get_height(composer.voice_win))
+        assert_legend_fits(composer)
+        assert_voice_fits(composer)
+        assert_legend_centered(composer)
+        assert_voice_title(composer)
+      end
+      vim.o.columns = 140
+      vim.o.lines = 12
+      vim.cmd("doautocmd VimResized")
+      assert_ordered_layout(composer)
+      assert.is_true(#vim.api.nvim_buf_get_lines(composer.legend_buf, 0, -1, false) <= vim.api.nvim_win_get_height(composer.legend_win))
+      assert_legend_fits(composer)
+      assert_voice_fits(composer)
+      assert_legend_centered(composer)
+      assert_voice_title(composer)
+      vim.o.columns = 120
+      vim.o.lines = 40
+      vim.cmd("doautocmd VimResized")
+      assert_ordered_layout(composer)
+      assert.is_true(#vim.api.nvim_buf_get_lines(composer.legend_buf, 0, -1, false) <= vim.api.nvim_win_get_height(composer.legend_win))
+      assert_legend_fits(composer)
+      assert_voice_fits(composer)
+      assert_legend_centered(composer)
+      assert_voice_title(composer)
+      require("code-review.composer").cancel()
+      code_review.quit()
+    end)
+    vim.o.columns = old_columns
+    vim.o.lines = old_lines
+    if not ok then
+      if code_review then
+        pcall(code_review.quit)
+      end
+      error(err)
+    end
   end)
 
   it("opens reference actions from enter and can go to the selected reference", function()
@@ -519,14 +737,16 @@ describe("comment composer", function()
     local code_review, actions, state = start_project()
     select_lines(actions, 1, 1)
     local buf = state.get().composer.buf
-    local status_buf = state.get().composer.status_buf
     local refs_buf = state.get().composer.refs_buf
+    local voice_buf = state.get().composer.voice_buf
+    local legend_buf = state.get().composer.legend_buf
     code_review.quit()
     assert.is_false(code_review.is_active())
     assert.equals(nil, state.get().composer)
     assert.is_false(vim.api.nvim_buf_is_valid(buf))
-    assert.is_false(vim.api.nvim_buf_is_valid(status_buf))
     assert.is_false(vim.api.nvim_buf_is_valid(refs_buf))
+    assert.is_false(vim.api.nvim_buf_is_valid(voice_buf))
+    assert.is_false(vim.api.nvim_buf_is_valid(legend_buf))
   end)
 
   it("inserts voice transcripts at the composer cursor", function()
@@ -562,13 +782,21 @@ describe("comment composer", function()
     end)
     local line = vim.api.nvim_buf_get_lines(composer.body_buf, 0, 1, false)[1]
     assert.equals("start voiceend", line)
+    assert.equals(nil, composer.spinner_timer)
+    local current_win = vim.api.nvim_get_current_win()
+    local cursor = vim.api.nvim_win_get_cursor(composer.body_win)
+    vim.wait(200)
+    assert.equals("composer", state.mode())
+    assert.equals(current_win, vim.api.nvim_get_current_win())
+    assert.same(cursor, vim.api.nvim_win_get_cursor(composer.body_win))
+    assert.is_true(vim.api.nvim_buf_is_valid(composer.voice_buf))
     process.record = old_record
     process.transcribe = old_transcribe
     require("code-review.composer").cancel()
     code_review.quit()
   end)
 
-  it("updates composer voice status during recording, transcribing, retry, and discard", function()
+  it("updates the display-only voice panel during recording, transcribing, retry, and discard", function()
     local code_review, actions, state = start_project()
     local config = require("code-review.config")
     local process = require("code-review.voice.process")
@@ -599,19 +827,49 @@ describe("comment composer", function()
     end
     require("code-review.voice").toggle()
     assert.truthy(record_opts)
-    assert.truthy(status_text(composer):find("Recording: press <leader><Space> to stop", 1, true))
+    assert_voice_frame_line(composer, recording_frames, "Recording")
+    assert.truthy(composer.spinner_timer)
+    local first_timer = composer.spinner_timer
     require("code-review.voice").toggle()
     assert.truthy(transcribe_opts)
-    assert.truthy(status_text(composer):find("Transcribing audio...", 1, true))
+    assert_voice_frame_line(composer, transcribing_frames, "Transcribing")
+    assert.equals(first_timer, composer.spinner_timer)
     transcribe_opts.on_exit(1, { ok = false, code = "network_error", message = "temporary", retryable = true }, "")
     assert.equals("voice_error_pending", state.mode())
-    assert.truthy(status_text(composer):find("Voice failed: press <leader><Space> to retry", 1, true))
+    assert_voice_line(composer, "×  Failed")
+    assert.equals(nil, composer.spinner_timer)
     require("code-review.voice").discard()
     assert.equals("composer", state.mode())
-    assert.truthy(status_text(composer):find("Voice ready: press <leader><Space> to record", 1, true))
+    assert_voice_line(composer, "○  Ready")
     process.record = old_record
     process.transcribe = old_transcribe
     require("code-review.composer").cancel()
+    code_review.quit()
+  end)
+
+  it("stops spinner ticks when the composer closes during recording", function()
+    local code_review, actions, state = start_project()
+    local config = require("code-review.config")
+    local process = require("code-review.voice.process")
+    local project = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":h")
+    local helper = project .. "/helper.js"
+    vim.fn.writefile({ "" }, helper)
+    config.setup({ storage = { dir = project .. "/store" }, voice = { helper_path = helper } })
+    select_lines(actions, 1, 1)
+    local composer = state.get().composer
+    local voice_buf = composer.voice_buf
+    local old_record = process.record
+    process.record = function(opts)
+      return { stop = function() end, discard = function() end, kill = function() end }
+    end
+    require("code-review.voice").toggle()
+    assert.truthy(composer.spinner_timer)
+    require("code-review.composer").cancel()
+    assert.equals(nil, composer.spinner_timer)
+    assert.is_false(vim.api.nvim_buf_is_valid(voice_buf))
+    vim.wait(200)
+    assert.equals("comment_list", state.mode())
+    process.record = old_record
     code_review.quit()
   end)
 
