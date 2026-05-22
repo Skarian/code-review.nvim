@@ -749,6 +749,50 @@ describe("comment composer", function()
     assert.is_false(vim.api.nvim_buf_is_valid(legend_buf))
   end)
 
+  it("adds voice transcript spaces only at the insertion boundary", function()
+    local code_review, actions, state, model = start_project()
+    select_lines(actions, 1, 1)
+    local composer = state.get().composer
+    local composer_module = require("code-review.composer")
+
+    local function insert_on_line(line, col, text)
+      vim.api.nvim_buf_set_lines(composer.body_buf, 0, -1, false, { line })
+      vim.api.nvim_win_set_cursor(composer.body_win, { 1, col })
+      assert.is_true(composer_module.insert_text(text))
+      return table.concat(vim.api.nvim_buf_get_lines(composer.body_buf, 0, -1, false), "\n")
+    end
+
+    assert.equals("start voice end", insert_on_line("startend", 5, "voice"))
+    assert.equals("start voice end", insert_on_line("start end", 6, "voice "))
+    assert.equals("start voice end", insert_on_line("start end", 5, "voice"))
+    assert.equals("voice start", insert_on_line("start", 0, "voice"))
+    assert.equals("start voice", insert_on_line("start", 5, "voice"))
+    assert.equals("start voice, end", insert_on_line("start, end", 5, "voice"))
+    assert.equals("alpha one\ntwo omega", insert_on_line("alphaomega", 5, "one\ntwo"))
+
+    composer_module.cancel()
+
+    local review = model.find_review(state.get().store, state.get().active_review_id)
+    local comment = model.new_comment("2026-05-18T00:00:01Z")
+    comment.body = "second"
+    table.insert(comment.file_references, model.new_file_reference({
+      relative_path = "x.lua",
+      start_line = 1,
+      end_line = 1,
+      selected_lines_snapshot = { "one" },
+    }))
+    table.insert(review.comments, comment)
+    composer_module.open_edit(comment)
+    composer = state.get().composer
+    assert.equals("second  ", composer_text(composer))
+    assert.is_true(composer_module.insert_text("voice"))
+    assert.equals("second voice ", composer_text(composer))
+    assert.equals("second", comment.body)
+
+    composer_module.cancel()
+    code_review.quit()
+  end)
+
   it("inserts voice transcripts at the composer cursor", function()
     local code_review, actions, state = start_project()
     local config = require("code-review.config")
@@ -781,7 +825,7 @@ describe("comment composer", function()
       return state.mode() == "composer" and state.get().voice == nil
     end)
     local line = vim.api.nvim_buf_get_lines(composer.body_buf, 0, 1, false)[1]
-    assert.equals("start voiceend", line)
+    assert.equals("start voice end", line)
     assert.equals(nil, composer.spinner_timer)
     local current_win = vim.api.nvim_get_current_win()
     local cursor = vim.api.nvim_win_get_cursor(composer.body_win)

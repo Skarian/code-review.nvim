@@ -75,6 +75,25 @@ local function body_text(composer)
   return table.concat(body_lines(composer), "\n")
 end
 
+local function word_like(char)
+  return char ~= "" and char:match("[%w_]") ~= nil
+end
+
+local function add_insert_boundary_spaces(lines, line, col)
+  if #lines == 0 then
+    return lines
+  end
+  local before = col > 0 and line:sub(col, col) or ""
+  local after = line:sub(col + 1, col + 1)
+  if before:match("%S") and lines[1]:match("^%S") then
+    lines[1] = " " .. lines[1]
+  end
+  if word_like(after) and lines[#lines]:match("%S$") then
+    lines[#lines] = lines[#lines] .. " "
+  end
+  return lines
+end
+
 local function voice_available()
   local cfg = config.get().voice
   if not cfg.enabled then
@@ -712,7 +731,9 @@ function M.insert_text(text)
     row = vim.api.nvim_buf_line_count(composer.body_buf) - 1
     col = #vim.api.nvim_buf_get_lines(composer.body_buf, row, row + 1, false)[1]
   end
-  vim.api.nvim_buf_set_text(composer.body_buf, row, col, row, col, vim.split(text, "\n", { plain = true }))
+  local line = vim.api.nvim_buf_get_lines(composer.body_buf, row, row + 1, false)[1] or ""
+  local lines = add_insert_boundary_spaces(vim.split(text, "\n", { plain = true }), line, col)
+  vim.api.nvim_buf_set_text(composer.body_buf, row, col, row, col, lines)
   M.refresh()
   return true
 end
