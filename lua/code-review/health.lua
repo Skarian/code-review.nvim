@@ -53,10 +53,9 @@ local function helper_health(checks)
     return
   end
   for _, check in ipairs(decoded.checks or {}) do
-    add(checks, "voice_" .. tostring(check.name), tostring(check.status or "warn"), tostring(check.message or check.code or check.name))
-  end
-  if not cfg.health.network then
-    add(checks, "voice_network", "warn", "Network checks disabled")
+    if type(check) == "table" and check.code ~= "not_checked" and check.code ~= "disabled" then
+      add(checks, "voice_" .. tostring(check.name), tostring(check.status or "warn"), tostring(check.message or check.code or check.name))
+    end
   end
 end
 
@@ -90,6 +89,8 @@ function M.run()
     end
   end
 end
+
+M.check = M.run
 
 function M.show()
   local lines = { "code-review.nvim health", "" }

@@ -23,12 +23,6 @@ export async function health(options = {}) {
             status: credentials.ok ? "ok" : "warn",
             code: credentials.ok ? "codex_file_chatgpt" : credentials.code,
             message: credentials.ok ? "Codex ChatGPT auth file found." : credentials.message
-        },
-        {
-            name: "audio_provider",
-            status: "warn",
-            code: "not_checked",
-            message: "Health does not open the microphone."
         }
     ];
     if (networkEnabled && credentials.ok) {
@@ -38,14 +32,6 @@ export async function health(options = {}) {
             status: reachable ? "ok" : "warn",
             code: reachable ? "chatgpt_reachable" : "chatgpt_unreachable",
             message: reachable ? "chatgpt.com TLS reachable." : "Could not verify TLS reachability to chatgpt.com."
-        });
-    }
-    else if (!networkEnabled) {
-        checks.push({
-            name: "network",
-            status: "warn",
-            code: "disabled",
-            message: "Network checks disabled."
         });
     }
     return {

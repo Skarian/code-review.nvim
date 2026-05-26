@@ -713,7 +713,7 @@ Requirements:
 - Implement record-then-transcribe, not realtime transcription.
 - Capture mono PCM from default microphone, encode as WAV, upload WAV.
 - Use `decibri` as the MVP microphone capture dependency, pinned in `voice/package-lock.json`.
-- If the audio provider cannot support the target platform without a compile toolchain, helper health reports `audio_provider_unavailable`; manual Review Mode still works.
+- If the audio provider cannot support the target platform without a compile toolchain, recording reports `audio_provider_unavailable`; manual Review Mode still works.
 
 Record command behavior:
 
@@ -897,7 +897,6 @@ Checks:
 - Credential discovery/classification.
 - Codex auth freshness when file auth is selected.
 - DNS/TLS reachability to `chatgpt.com` when `health.network = true` and credentials are fresh.
-- Audio provider availability when it can be checked safely.
 
 Rules:
 
@@ -907,8 +906,8 @@ Rules:
 - Health must not record audio.
 - Health must not open the microphone if that may trigger an OS permission prompt.
 - Health must not call `/backend-api/transcribe`.
-- If audio provider availability cannot be checked safely, report `warn/not_checked`.
-- If `health.network = false`, skip DNS/TLS checks and report `warn/not_checked`.
+- Omit intentionally skipped checks instead of reporting `warn/not_checked`.
+- If `health.network = false`, skip DNS/TLS checks and omit the network result.
 - Health never refreshes tokens and never writes Codex auth files.
 
 Helper health output example:
@@ -922,12 +921,6 @@ Helper health output example:
       "status": "ok",
       "code": "node_ready",
       "message": "Node.js 20.11.0"
-    },
-    {
-      "name": "audio_provider",
-      "status": "warn",
-      "code": "not_checked",
-      "message": "Audio provider check skipped to avoid opening microphone"
     },
     {
       "name": "credentials",

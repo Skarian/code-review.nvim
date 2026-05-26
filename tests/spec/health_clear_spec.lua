@@ -15,31 +15,41 @@ describe("health and clear data", function()
     assert.is_true(has_helper)
   end)
 
-  it("includes voice helper health JSON when helper is available", function()
+  it("exposes the Neovim checkhealth entrypoint", function()
+    require("code-review.config").setup({ voice = { helper_path = "/missing/code-review-helper.js" }, health = { network = false } })
+    local health = require("code-review.health")
+    assert.equals("function", type(health.check))
+    assert.equals(health.run, health.check)
+    local ok, err = pcall(health.check)
+    assert(ok, tostring(err))
+  end)
+
+  it("includes checked voice helper health JSON when helper is available", function()
     local dir = vim.fn.tempname()
     vim.fn.mkdir(dir, "p")
     local helper = dir .. "/helper.mjs"
     vim.fn.writefile({
       "console.log(JSON.stringify({ checks: [",
       "  { name: 'credentials', status: 'warn', message: 'Codex auth not found' },",
-      "  { name: 'audio_provider', status: 'warn', message: 'Health does not open the microphone.' }",
+      "  { name: 'audio_provider', status: 'warn', code: 'not_checked', message: 'Health does not open the microphone.' },",
+      "  { name: 'audio_provider', status: 'warn', code: 'audio_provider_unavailable', message: 'Audio provider unavailable.' }",
       "] }))",
     }, helper)
     require("code-review.config").setup({ voice = { helper_path = helper } })
     local checks = require("code-review.health").checks()
     local found_credentials = false
-    local found_audio = false
+    local audio_message
     for _, check in ipairs(checks) do
       if check.name == "voice_credentials" then
         found_credentials = true
         assert.equals("warn", check.status)
       elseif check.name == "voice_audio_provider" then
-        found_audio = true
+        audio_message = check.message
         assert.equals("warn", check.status)
       end
     end
     assert.is_true(found_credentials)
-    assert.is_true(found_audio)
+    assert.equals("Audio provider unavailable.", audio_message)
   end)
 
   it("passes no-network flag to helper health when disabled", function()
