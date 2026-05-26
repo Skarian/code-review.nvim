@@ -1,16 +1,17 @@
 import { createRequire } from "node:module";
 import { createWriteStream } from "node:fs";
 import { open, readFile, stat } from "node:fs/promises";
-import { spawn } from "node:child_process";
+import { spawn as nodeSpawn } from "node:child_process";
 import { helperError } from "../errors.js";
 
 const require = createRequire(import.meta.url);
+const FFMPEG_STOP_GRACE_MS = 1500;
 
-function commandExists(command: string): Promise<boolean> {
+function commandExists(command: string, spawnImpl: any = nodeSpawn): Promise<boolean> {
   return new Promise((resolve) => {
-    const child = spawn(command, ["-version"], { stdio: "ignore" });
+    const child = spawnImpl(command, ["-version"], { stdio: "ignore" });
     child.once("error", () => resolve(false));
-    child.once("exit", (code) => resolve(code === 0));
+    child.once("exit", (code: number) => resolve(code === 0));
   });
 }
 
@@ -33,17 +34,35 @@ function wavHeader(dataBytes: number, sampleRate: number, channels: number) {
   return header;
 }
 
+async function waitForExit(closePromise: Promise<void>, timeoutMs: number) {
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      closePromise.then(() => true),
+      new Promise<boolean>((resolve) => {
+        timeout = setTimeout(() => resolve(false), timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 async function createFfmpegRecorder(options: any = {}): Promise<any> {
-  if (process.platform !== "darwin" || !await commandExists("ffmpeg")) {
+  const spawnImpl = options.spawnImpl || nodeSpawn;
+  const platform = options.platform || process.platform;
+  const commandExistsImpl = options.commandExistsImpl || ((command: string) => commandExists(command, spawnImpl));
+  if (platform !== "darwin" || !await commandExistsImpl("ffmpeg")) {
     return null;
   }
   const sampleRate = options.sampleRate ?? 16000;
   const channels = options.channels ?? 1;
   const out = options.out;
+  const stopGraceMs = options.stopGraceMs ?? FFMPEG_STOP_GRACE_MS;
   if (!out) return null;
   let pendingError: any = null;
   let stderr = "";
-  const child = spawn("ffmpeg", [
+  const child = spawnImpl("ffmpeg", [
     "-y",
     "-loglevel",
     "error",
@@ -59,15 +78,15 @@ async function createFfmpegRecorder(options: any = {}): Promise<any> {
     "wav",
     out
   ], { stdio: ["ignore", "ignore", "pipe"] });
-  child.stderr?.on("data", (chunk) => {
+  child.stderr?.on?.("data", (chunk: Buffer | string) => {
     stderr += String(chunk);
   });
-  child.once("error", (error) => {
+  child.once("error", (error: Error) => {
     pendingError = error;
   });
   let exited = false;
   const closePromise = new Promise<void>((resolve) => {
-    child.once("exit", (code) => {
+    child.once("exit", (code: number) => {
       exited = true;
       if (code && code !== 255 && !pendingError) {
         pendingError = Object.assign(new Error(stderr || "ffmpeg recording failed"), { code: "GenericFailure" });
@@ -75,17 +94,27 @@ async function createFfmpegRecorder(options: any = {}): Promise<any> {
       resolve();
     });
   });
+  const forceStop = async () => {
+    if (!exited) {
+      child.kill("SIGKILL");
+      await waitForExit(closePromise, stopGraceMs).catch(() => false);
+    }
+  };
   return {
     ok: true,
     provider: "ffmpeg-avfoundation",
     error() {
       return pendingError;
     },
+    forceStop,
     async stop() {
       if (!exited) {
         child.kill("SIGINT");
+        const stopped = await waitForExit(closePromise, stopGraceMs);
+        if (!stopped) {
+          await forceStop();
+        }
       }
-      await closePromise;
       const info = await stat(out).catch(() => ({ size: 0 }));
       const wav = await readFile(out).catch(() => Buffer.alloc(44));
       return { wav, audioBytes: Math.max(0, info.size - 44) };
@@ -108,7 +137,7 @@ export async function createRecorder(options: any = {}): Promise<any> {
   let mic;
   try {
     mic = new Decibri({ sampleRate, channels, format: "int16" });
-  } catch (error) {
+  } catch (error: any) {
     return { ok: false, error: helperError("audio_provider_unavailable", "Audio provider unavailable. Rebuild voice helper or check platform support.", false, { reason: error?.code || error?.name }) };
   }
   const chunks: Buffer[] = [];
@@ -133,6 +162,15 @@ export async function createRecorder(options: any = {}): Promise<any> {
     ok: true,
     error() {
       return pendingError;
+    },
+    async forceStop() {
+      try {
+        mic.stop();
+      } catch {
+      }
+      if (stream) {
+        stream.destroy?.();
+      }
     },
     async stop() {
       mic.stop();

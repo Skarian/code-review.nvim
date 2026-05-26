@@ -1,12 +1,13 @@
 import { createRequire } from "node:module";
 import { createWriteStream } from "node:fs";
 import { open, readFile, stat } from "node:fs/promises";
-import { spawn } from "node:child_process";
+import { spawn as nodeSpawn } from "node:child_process";
 import { helperError } from "../errors.js";
 const require = createRequire(import.meta.url);
-function commandExists(command) {
+const FFMPEG_STOP_GRACE_MS = 1500;
+function commandExists(command, spawnImpl = nodeSpawn) {
     return new Promise((resolve) => {
-        const child = spawn(command, ["-version"], { stdio: "ignore" });
+        const child = spawnImpl(command, ["-version"], { stdio: "ignore" });
         child.once("error", () => resolve(false));
         child.once("exit", (code) => resolve(code === 0));
     });
@@ -29,18 +30,37 @@ function wavHeader(dataBytes, sampleRate, channels) {
     header.writeUInt32LE(dataBytes, 40);
     return header;
 }
+async function waitForExit(closePromise, timeoutMs) {
+    let timeout;
+    try {
+        return await Promise.race([
+            closePromise.then(() => true),
+            new Promise((resolve) => {
+                timeout = setTimeout(() => resolve(false), timeoutMs);
+            })
+        ]);
+    }
+    finally {
+        if (timeout)
+            clearTimeout(timeout);
+    }
+}
 async function createFfmpegRecorder(options = {}) {
-    if (process.platform !== "darwin" || !await commandExists("ffmpeg")) {
+    const spawnImpl = options.spawnImpl || nodeSpawn;
+    const platform = options.platform || process.platform;
+    const commandExistsImpl = options.commandExistsImpl || ((command) => commandExists(command, spawnImpl));
+    if (platform !== "darwin" || !await commandExistsImpl("ffmpeg")) {
         return null;
     }
     const sampleRate = options.sampleRate ?? 16000;
     const channels = options.channels ?? 1;
     const out = options.out;
+    const stopGraceMs = options.stopGraceMs ?? FFMPEG_STOP_GRACE_MS;
     if (!out)
         return null;
     let pendingError = null;
     let stderr = "";
-    const child = spawn("ffmpeg", [
+    const child = spawnImpl("ffmpeg", [
         "-y",
         "-loglevel",
         "error",
@@ -56,7 +76,7 @@ async function createFfmpegRecorder(options = {}) {
         "wav",
         out
     ], { stdio: ["ignore", "ignore", "pipe"] });
-    child.stderr?.on("data", (chunk) => {
+    child.stderr?.on?.("data", (chunk) => {
         stderr += String(chunk);
     });
     child.once("error", (error) => {
@@ -72,17 +92,27 @@ async function createFfmpegRecorder(options = {}) {
             resolve();
         });
     });
+    const forceStop = async () => {
+        if (!exited) {
+            child.kill("SIGKILL");
+            await waitForExit(closePromise, stopGraceMs).catch(() => false);
+        }
+    };
     return {
         ok: true,
         provider: "ffmpeg-avfoundation",
         error() {
             return pendingError;
         },
+        forceStop,
         async stop() {
             if (!exited) {
                 child.kill("SIGINT");
+                const stopped = await waitForExit(closePromise, stopGraceMs);
+                if (!stopped) {
+                    await forceStop();
+                }
             }
-            await closePromise;
             const info = await stat(out).catch(() => ({ size: 0 }));
             const wav = await readFile(out).catch(() => Buffer.alloc(44));
             return { wav, audioBytes: Math.max(0, info.size - 44) };
@@ -132,6 +162,16 @@ export async function createRecorder(options = {}) {
         ok: true,
         error() {
             return pendingError;
+        },
+        async forceStop() {
+            try {
+                mic.stop();
+            }
+            catch {
+            }
+            if (stream) {
+                stream.destroy?.();
+            }
         },
         async stop() {
             mic.stop();
