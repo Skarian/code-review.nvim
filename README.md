@@ -1,203 +1,146 @@
 # code-review.nvim
 
-`code-review.nvim` adds a plugin-managed Review Mode for Neovim 0.11.
+Collect code-review comments without leaving your buffers, by typing or by voice.
 
-It lets you collect short code review comments while staying in code buffers:
+`code-review.nvim` brings a code review workflow into Neovim. Toggle Review Mode, select the lines you want to comment on, and write your feedback by hand or by voice.
 
-- create project-scoped Reviews;
-- attach exact linewise File References from visual selections;
-- compose complete Comments manually or by voice;
-- see references highlighted in the current buffer;
-- detect stale references; and
-- open an editable plain-text preview for handoff to an agent or another workflow.
+A **review** is a named collection of **comments** scoped to one project. Each comment is a note attached to one or more exact line ranges. Reviews are saved locally outside your repo, comments stay anchored to the code they reference (and are flagged when that code changes), and any review can be exported as plain text to hand to an AI agent or paste into a pull request.
 
-Preview opens as an editable unnamed buffer. Code Review owns it only while it remains unsaved; if you write it to a file, that buffer becomes a normal user file and future previews open in a fresh buffer. Append writes such as `:write >> file` export the text without naming the preview buffer, so the preview stays open and Code Review-owned.
-
-Review Mode is plugin state, not a native Neovim mode.
+- Keep several named reviews per project — one per branch, feature, or review pass.
+- Comments anchored to exact line ranges, flagged stale when the code changes.
+- Write comments by hand or dictate them by voice.
+- Export any review as plain text for agent handoff or copy/paste.
 
 ## Requirements
 
-- Neovim 0.11 or newer.
-- [`folke/snacks.nvim`](https://github.com/folke/snacks.nvim) at runtime.
-- Node.js 20 or newer for voice.
-- Existing Codex ChatGPT auth for voice. If auth is missing or expired, run:
+- Neovim 0.11+
+- [`folke/snacks.nvim`](https://github.com/folke/snacks.nvim)
+- Voice (optional): Node.js 20+ and a Codex ChatGPT login — run `codex login` if you don't have one.
 
-```sh
-codex login
-```
-
-Voice release qualification targets macOS arm64 and Windows x64. macOS x64 is best effort. Linux and WSL voice support are future work.
+Voice is tested on macOS. It should also work on Windows, though that's untested.
 
 ## Install
 
-Runtime install should not require a build step:
+[lazy.nvim](https://github.com/folke/lazy.nvim):
 
 ```lua
 {
-  "your-org/code-review.nvim",
+  "Skarian/code-review.nvim",
   dependencies = { "folke/snacks.nvim" },
   opts = {},
 }
 ```
 
-Optional voice rebuild:
+Runtime install should not require a build step. To rebuild the bundled voice helper on install:
 
 ```lua
 {
-  "your-org/code-review.nvim",
+  "Skarian/code-review.nvim",
   dependencies = { "folke/snacks.nvim" },
   build = "npm ci --prefix voice && npm run build --prefix voice",
   opts = {},
 }
 ```
 
-Release artifacts include:
+## Usage
 
-- `voice/dist/index.js`
-- `voice/package.json`
-- `voice/package-lock.json`
+1. Run `:CodeReview` (or `<leader>rR`) in your project, then create a review — just give it a name.
+2. In a saved file, visually select some lines and press `<leader>ra`. This opens the Comment Editor with those lines attached.
+3. Write your note, or press `<leader><Space>` to dictate it by voice.
+4. Leave Insert mode and press `<CR>` to save the comment.
+5. Press `<leader>rp` to preview the whole review as plain text, then copy it or hand it off.
 
 ## Commands
 
-| Command | Behavior |
+| Command | Action |
 | --- | --- |
-| `:CodeReview` | Toggle Review Mode. |
-| `:CodeReviewHealth` | Open a health report buffer. |
-| `:CodeReviewClearData` | Delete the current project store after confirmation. |
-| `:checkhealth code-review` | Run health checks. |
+| `:CodeReview` | Toggle Review Mode |
+| `:CodeReviewHealth` | Open a health report |
+| `:CodeReviewClearData` | Delete this project's stored reviews after confirmation |
+| `:checkhealth code-review` | Run health checks |
 
 ## Keymaps
 
-The plugin does not map bare `<leader>r`.
+All default mappings start with `<leader>r`. Change the prefix, remap any action, or turn one off in [Configuration](#configuration).
 
-By default, `<leader>r` is only a parent namespace for which-key and child mappings:
+| Mapping | Mode | Action |
+| --- | --- | --- |
+| `<leader>ra` | Visual | New comment from visual selection |
+| `<leader>rr` | Visual | Append visual selection to an existing comment |
+| `<leader>rc` | Normal | Comment picker: edit, delete, or jump |
+| `<leader>ro` | Normal | Edit the comment under the cursor |
+| `<leader>rR` | Normal | Review picker; starts Review Mode if needed |
+| `<leader>rp` | Normal | Preview the active review |
+| `<leader>rt` | Normal | Toggle Review Mode |
 
-| Mapping | Action |
-| --- | --- |
-| `<leader>ra` | From Visual mode, create a new Comment from the selected lines and open the Comment Editor. |
-| `<leader>rr` | From Visual mode, append the selected lines to an existing Comment through the Comment picker. |
-| `<leader>rc` | Open the Comment picker for edit, delete, or jump actions. |
-| `<leader>rR` | Start Review Mode if needed, then open the Review picker to create, switch, delete, or delete all Reviews. |
-| `<leader>rp` | Open preview. |
-| `<leader>rt` | Toggle Review Mode. |
+Inside the Comment Editor, `<Tab>` and `<S-Tab>` cycle between References and Comment. `<leader><Space>` starts, stops, or retries voice dictation. `<leader>d` deletes the current draft/comment from the Comment pane, or the focused reference from the References pane. `?` opens editor help.
 
-The Comment Editor is a stacked floating layout with a focusable read-only File References panel, an editable comment buffer, a display-only Voice panel, and a plain command legend. Initial focus goes to the comment buffer, which contains only the comment body and uses normal Vim editing. `<Tab>` and `<S-Tab>` move between references and the comment body. Normal `<CR>` submits from the comment buffer; `<CR>` on a reference opens Delete / Go to actions; `<leader>d` deletes the whole comment or draft from the comment buffer and deletes the focused File Reference from the references panel. Go to jumps the source window to the selected File Reference while keeping the Comment Editor open. Normal `<leader><Space>` starts, stops, or retries voice dictation. Normal `?` opens Comment Editor help.
-
-New Comments are persisted only after submit succeeds. Submit requires at least one File Reference and non-empty body text. Canceling a new Comment Editor creates nothing.
-
-Configure or disable mappings:
+Disable or remap any action via `setup`; each action also has a `<Plug>(code-review-...)` mapping.
 
 ```lua
 require("code-review").setup({
+  keymaps = { enabled = false }, -- or set an individual action to false
+})
+```
+
+## Configuration
+
+Defaults:
+
+```lua
+require("code-review").setup({
+  sidebar = { width = 42, position = "right" },
   keymaps = {
+    enabled = true,
     prefix = "<leader>r",
-    edit_comment = false,
+    review_picker = "R",
+    add_reference = "a",
+    append_reference = "r",
+    edit_comment = "c",
+    edit_comment_under_cursor = "o",
+    preview = "p",
+    toggle = "t",
   },
+  storage = { dir = nil, debounce_ms = 250 },
+  stale = { debounce_ms = 200 },
+  voice = {
+    enabled = true,
+    node_cmd = "node",
+    helper_path = nil,
+    max_recording_ms = 60000,
+    max_audio_bytes = 16 * 1024 * 1024,
+    min_duration_ms = 900,
+    max_transcription_attempts = 3,
+    transcription_timeout_ms = 120000,
+  },
+  health = { network = true },
 })
 ```
 
-Disable all default mappings:
-
-```lua
-require("code-review").setup({
-  keymaps = { enabled = false },
-})
-```
-
-## Statusline
-
-Use:
-
-```lua
-require("code-review").status()
-```
-
-It returns `"REVIEW"` while Review Mode is active and `""` otherwise.
+Statusline helper: `require("code-review").status()` returns `"REVIEW"` while active, `""` otherwise.
 
 ## Storage
 
-Review data is stored outside the repository under:
+Reviews are stored locally under:
 
 ```text
-stdpath("data")/code-review.nvim/reviews/<project-root-hash>.json
+stdpath("data")/code-review.nvim/
 ```
 
-The store contains Review names, Comment bodies, relative file paths, line ranges, selected line snapshots, timestamps, and stale state.
+Stored review data includes comment bodies, file paths, line ranges, selected text snapshots, timestamps, and stale-reference state.
 
-## Voice Privacy
+## Voice & privacy
 
-Voice uses existing Codex file-backed ChatGPT auth. The plugin and helper do not:
+Voice records a short clip and sends it to ChatGPT for transcription, using the Codex login you already have on your machine. The plugin only reads that login; it never modifies it.
 
-- perform OAuth;
-- refresh tokens;
-- use API keys;
-- read or write OS keyrings;
-- mutate Codex auth files; or
-- call Codex CLI.
+Temporary audio is written to disk while you dictate and removed afterward; it is not stored durably. Provider-side retention may apply to transcribed audio.
 
-The helper reads the first available Codex `auth.json`, sends recorded audio to ChatGPT transcription, and returns transcript text to Neovim. Health checks do not open the microphone and do not call `/backend-api/transcribe`.
-
-Automated tests use mock auth, mock audio, and mock HTTP only.
-
-## Troubleshooting
-
-| Problem | Fix |
-| --- | --- |
-| Voice helper missing | Run `:Lazy build code-review.nvim` or `npm ci --prefix voice && npm run build --prefix voice`. |
-| Codex auth missing/expired | Run `codex login`. |
-| Audio provider unavailable | Rebuild the voice helper and confirm the platform is supported. On macOS, the helper can fall back to `ffmpeg`/AVFoundation if Decibri cannot open the default microphone. |
-| Preview blocked | Submit or delete incomplete draft work and update or delete stale File References. |
-
-## Tests
-
-Lua:
+If your Codex login is missing or expired:
 
 ```sh
-nvim --headless -i NONE -u tests/minimal_init.lua -c "PlenaryBustedDirectory tests/spec { minimal_init = 'tests/minimal_init.lua' }" -c qa
+codex login
 ```
 
-All automated gates:
+## License
 
-```sh
-scripts/validate.sh
-NVIM_011=/path/to/nvim-0.11 scripts/validate.sh
-```
-
-Final non-interactive gate after `codex login` and Claude CLI login:
-
-```sh
-scripts/final-gates.sh
-```
-
-Voice:
-
-```sh
-npm ci --prefix voice
-npm test --prefix voice
-npm run typecheck --prefix voice
-npm run lint --prefix voice
-npm run build --prefix voice
-```
-
-Smoke test:
-
-```sh
-sh scripts/smoke.sh
-NVIM=/path/to/nvim-0.11 sh scripts/smoke.sh
-```
-
-Manual voice smoke test after `codex login`:
-
-```sh
-scripts/voice-smoke.sh
-```
-
-This records one short clip, sends it through the bundled helper, prints the transcript JSON, and deletes the temp audio file.
-
-See [docs/VALIDATION.md](docs/VALIDATION.md) for the full release qualification checklist, including manual voice and external reviewer gates.
-
-External reviewer gate after Claude CLI login:
-
-```sh
-scripts/claude-review.sh
-```
+[MIT](LICENSE)
