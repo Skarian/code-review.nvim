@@ -4,5 +4,6 @@ export function redact(value) {
         .replace(/eyJ[A-Za-z0-9._-]+/g, "[REDACTED_JWT]")
         .replace(/"access_token"\s*:\s*"[^"]+"/g, "\"access_token\":\"[REDACTED]\"")
         .replace(/"id_token"\s*:\s*"[^"]+"/g, "\"id_token\":\"[REDACTED]\"")
+        .replace(/[A-Za-z]:[\\/][^\s"]+\.wav/g, "[REDACTED_AUDIO_PATH]")
         .replace(/\/[^\s"]+\.wav/g, "[REDACTED_AUDIO_PATH]");
 }

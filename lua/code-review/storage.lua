@@ -10,7 +10,14 @@ local M = {}
 local uv = vim.uv or vim.loop
 
 local function mkdir(path)
-  vim.fn.mkdir(path, "p")
+  local ok, err = pcall(vim.fn.mkdir, path, "p")
+  if not ok then
+    return false, err
+  end
+  if vim.fn.isdirectory(path) == 0 then
+    return false, "not a directory"
+  end
+  return true
 end
 
 local function storage_dir()
@@ -126,7 +133,11 @@ function M.save(handle)
     return false
   end
   stop_timer(handle)
-  mkdir(vim.fs.dirname(handle.path))
+  local dir_ok, dir_err = mkdir(vim.fs.dirname(handle.path))
+  if not dir_ok then
+    notify.error("Could not create Code Review storage directory: " .. tostring(dir_err))
+    return false
+  end
   local tmp = handle.path .. ".tmp." .. tostring(uv.hrtime())
   local text = vim.json.encode(handle.store)
   local fd, err = uv.fs_open(tmp, "w", 438)

@@ -38,4 +38,28 @@ describe("storage", function()
     local backups = vim.fn.glob(dir .. "/*.corrupt-*.json", false, true)
     assert.equals(1, #backups)
   end)
+
+  it("reports write failures without marking the store clean", function()
+    local storage = require("code-review.storage")
+    local model = require("code-review.model")
+    local blocker = vim.fn.tempname()
+    vim.fn.writefile({ "not a directory" }, blocker)
+    local handle = {
+      path = blocker .. "/store.json",
+      store = model.new_store("/tmp/project", "abc"),
+      dirty = true,
+    }
+    local old_notify = vim.notify
+    local messages = {}
+    vim.notify = function(message)
+      messages[#messages + 1] = message
+    end
+
+    local ok = storage.save(handle)
+
+    vim.notify = old_notify
+    assert.is_false(ok)
+    assert.is_true(handle.dirty)
+    assert.truthy(messages[1]:find("Could not create Code Review storage directory", 1, true))
+  end)
 end)

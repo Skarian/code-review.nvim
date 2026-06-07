@@ -1,9 +1,17 @@
 local M = {}
 
 local uv = vim.uv or vim.loop
+local windows_override = nil
 
 local function normalize_slashes(path)
   return (path or ""):gsub("\\", "/")
+end
+
+local function is_windows()
+  if windows_override ~= nil then
+    return windows_override
+  end
+  return vim.fn.has("win32") == 1
 end
 
 function M.normalize(path)
@@ -27,7 +35,7 @@ end
 function M.relative(root, target)
   root = normalize_slashes(M.realpath(root) or root)
   target = normalize_slashes(M.realpath(target) or target)
-  if vim.fn.has("win32") == 1 then
+  if is_windows() then
     root = root:lower()
     target = target:lower()
   end
@@ -53,6 +61,10 @@ function M.join(...)
   local out = table.concat(parts, "/")
   out = out:gsub("/+", "/")
   return out
+end
+
+function M._set_windows_for_tests(value)
+  windows_override = value
 end
 
 return M
