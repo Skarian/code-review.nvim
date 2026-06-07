@@ -17,7 +17,7 @@ A **review** is a named collection of **comments** scoped to one project. Each c
 - [`folke/snacks.nvim`](https://github.com/folke/snacks.nvim)
 - Voice (optional): Node.js 20+ and a Codex ChatGPT login — run `codex login` if you don't have one.
 
-Voice is tested on macOS. It should also work on Windows, though that's untested.
+Voice is qualified on macOS. Windows voice support is not release-qualified yet; manual review still works when voice is unavailable.
 
 ## Install
 
@@ -57,6 +57,7 @@ Runtime install should not require a build step. To rebuild the bundled voice he
 | `:CodeReview` | Toggle Review Mode |
 | `:CodeReviewHealth` | Open a health report |
 | `:CodeReviewClearData` | Delete this project's stored reviews after confirmation |
+| `:CodeReviewVoiceDevices` | Choose the microphone used for voice dictation |
 | `:checkhealth code-review` | Run health checks |
 
 ## Keymaps
@@ -66,14 +67,17 @@ All default mappings start with `<leader>r`. Change the prefix, remap any action
 | Mapping | Mode | Action |
 | --- | --- | --- |
 | `<leader>ra` | Visual | New comment from visual selection |
+| `<leader>ra` | Normal | Show a visual-selection hint |
 | `<leader>rr` | Visual | Append visual selection to an existing comment |
+| `<leader>rr` | Normal | Show a visual-selection hint |
 | `<leader>rc` | Normal | Comment picker: edit, delete, or jump |
 | `<leader>ro` | Normal | Edit the comment under the cursor |
+| `<leader>rm` | Normal | Choose the microphone used for voice dictation |
 | `<leader>rR` | Normal | Review picker; starts Review Mode if needed |
 | `<leader>rp` | Normal | Preview the active review |
 | `<leader>rt` | Normal | Toggle Review Mode |
 
-Inside the Comment Editor, `<Tab>` and `<S-Tab>` cycle between References and Comment. `<leader><Space>` starts, stops, or retries voice dictation. `<leader>d` deletes the current draft/comment from the Comment pane, or the focused reference from the References pane. `?` opens editor help.
+Inside the Comment Editor, `<Tab>` and `<S-Tab>` cycle between References and Comment. `<leader><Space>` starts, cancels startup, stops, or retries voice dictation. `<leader>x` discards a failed voice transcription. `<leader>d` deletes the current draft/comment from the Comment pane, or the focused reference from the References pane. `?` opens editor help.
 
 Disable or remap any action via `setup`; each action also has a `<Plug>(code-review-...)` mapping.
 
@@ -98,6 +102,7 @@ require("code-review").setup({
     append_reference = "r",
     edit_comment = "c",
     edit_comment_under_cursor = "o",
+    microphone = "m",
     preview = "p",
     toggle = "t",
   },
@@ -109,6 +114,8 @@ require("code-review").setup({
     helper_path = nil,
     max_recording_ms = 60000,
     max_audio_bytes = 16 * 1024 * 1024,
+    device_cache_ttl_ms = 60000,
+    pre_roll_ms = 250,
     min_duration_ms = 900,
     max_transcription_attempts = 3,
     transcription_timeout_ms = 120000,
@@ -124,16 +131,26 @@ Statusline helper: `require("code-review").status()` returns `"REVIEW"` while ac
 Reviews are stored locally under:
 
 ```text
-stdpath("data")/code-review.nvim/
+stdpath("data")/code-review.nvim/reviews/
 ```
 
 Stored review data includes comment bodies, file paths, line ranges, selected text snapshots, timestamps, and stale-reference state.
+
+The selected voice microphone is a machine-local preference stored separately under:
+
+```text
+stdpath("state")/code-review.nvim/voice-device.json
+```
 
 ## Voice & privacy
 
 Voice records a short clip and sends it to ChatGPT for transcription, using the Codex login you already have on your machine. The plugin only reads that login; it never modifies it.
 
 Temporary audio is written to disk while you dictate and removed afterward; it is not stored durably. Provider-side retention may apply to transcribed audio.
+
+Use `:CodeReviewVoiceDevices` or `<leader>rm` to choose the microphone used for dictation. The Comment Editor asynchronously prewarms microphone discovery and pre-opens the selected microphone after opening so voice capture can start quickly. The mic may stay open while the editor is open, but audio is not written to disk or transcribed until you press voice; a small in-memory pre-roll protects the first syllable. Without a saved choice, voice capture uses a fresh cached recommendation when available; otherwise the helper lists devices and prefers a likely physical microphone before the system default. The picker labels likely virtual inputs, such as Zoom or loopback devices, but still allows selecting them explicitly.
+
+For manual voice smoke testing, use `CODE_REVIEW_VOICE_AUDIO_DEVICE=<id-or-name> scripts/voice-smoke.sh` to force a specific microphone.
 
 If your Codex login is missing or expired:
 

@@ -115,13 +115,13 @@ Release artifacts must include:
 - `voice/package.json`
 - `voice/package-lock.json`
 
-Manual Review Mode must work when the helper is missing or voice is unavailable. The sidebar should still show the voice action as unavailable when configured. Pressing it should notify with a concrete fix, for example:
+Manual Review Mode must work when the helper is missing or voice is unavailable. The Comment Editor voice panel should show voice as unavailable when configured or missing. Pressing the voice mapping should notify with a concrete fix, for example:
 
 ```text
 Voice helper missing: run :Lazy build code-review.nvim
 ```
 
-Voice release qualification targets macOS arm64 and Windows x64. macOS x64 is best effort if the selected audio provider ships compatible binaries. Linux and WSL are future work.
+Voice release qualification targets macOS for now. Windows x64 voice is not release-qualified in this cleanup; no Windows runtime gate is required. Linux and WSL are future work.
 
 ## Public API and commands
 
@@ -145,9 +145,10 @@ require("code-review").is_active()
 | `:CodeReview` | Toggle Review Mode. |
 | `:CodeReviewHealth` | Show the same checks exposed by `:checkhealth code-review`. |
 | `:CodeReviewClearData` | Delete the current project store after confirmation. |
+| `:CodeReviewVoiceDevices` | Choose the microphone used for voice dictation. |
 | `:checkhealth code-review` | Run health checks. |
 
-If `:CodeReviewClearData` runs while Review Mode is active, Review Mode exits first, clears UI/transient state, and then deletes the current project store after confirmation. It must not delete corrupt backups.
+If `:CodeReviewClearData` runs while Review Mode is active, Review Mode exits first, clears UI/transient state, and then deletes the current project store after confirmation. If Review Mode cannot exit, for example because a modified preview refuses to close, clear-data aborts and leaves stored data untouched. It must not delete corrupt backups.
 
 The plugin ships highlight groups users can style. README may show statusline integrations, but the plugin must not depend on any statusline plugin.
 
@@ -168,6 +169,8 @@ Default configuration:
     add_reference = "a",
     append_reference = "r",
     edit_comment = "c",
+    edit_comment_under_cursor = "o",
+    microphone = "m",
     preview = "p",
     toggle = "t",
   },
@@ -184,6 +187,8 @@ Default configuration:
     helper_path = nil,
     max_recording_ms = 60000,
     max_audio_bytes = 16 * 1024 * 1024,
+    device_cache_ttl_ms = 60000,
+    pre_roll_ms = 250,
     min_duration_ms = 900,
     max_transcription_attempts = 3,
     transcription_timeout_ms = 120000,
@@ -203,6 +208,7 @@ Rules:
 - The plugin does not create a default mapping for bare `:CodeReview`.
 - `keymaps.prefix` is a parent namespace only. It is not mapped to an action by itself.
 - Voice credential strategy is not configurable in MVP.
+- Voice microphone selection is a machine-local preference, not Review data.
 
 ## Keymaps
 
@@ -217,8 +223,12 @@ Default action mappings:
 | Mapping | Mode | Action |
 | --- | --- | --- |
 | `<leader>ra` | Visual | Create a new Comment from the selected lines and open the Comment Editor. |
+| `<leader>ra` | Normal | Notify that a visual selection is required to create a Comment. |
 | `<leader>rr` | Visual | Append selected lines to an existing Comment through the Comment picker. |
+| `<leader>rr` | Normal | Notify that a visual selection is required to append a File Reference. |
 | `<leader>rc` | Normal | Open the Comment picker for edit, delete, or jump actions. |
+| `<leader>ro` | Normal | Edit the Comment under the cursor, or open a picker when multiple Comments cover the line. |
+| `<leader>rm` | Normal | Choose the microphone used for voice dictation. |
 | `<leader>rR` | Normal | Open Review picker. If Review Mode is inactive, start it first. |
 | `<leader>rp` | Normal | Open preview. |
 | `<leader>rt` | Normal | Toggle Review Mode. |
@@ -234,7 +244,7 @@ Rules:
 - Do not map terminal, help, prompt, quickfix, sidebar, preview, or composer buffers except for buffer-specific UI behavior.
 - Visual add-reference must capture visual marks before leaving visual mode.
 - Optional `which-key.nvim` registration must be idempotent and must not warn when absent.
-- Optional `which-key.nvim` registration uses `keymaps.prefix` as the `Code Review` group and registers child action labels below it.
+- Optional `which-key.nvim` registration uses `keymaps.prefix` as the `Code Review` group, while installed keymaps provide their own action descriptions.
 
 ## Review Mode lifecycle
 
@@ -244,6 +254,7 @@ States:
 - `review_picker`
 - `comment_list`
 - `composer`
+- `recording_starting`
 - `recording`
 - `transcribing`
 - `voice_error_pending`
@@ -256,9 +267,10 @@ Core transitions:
 - Visual add-reference from `comment_list` opens a new Comment Editor with the selected lines as draft reference.
 - Visual append-reference from `comment_list` captures the selected lines and opens the Comment picker. Selecting a Comment appends the captured reference to that Comment.
 - Normal edit-comment from `comment_list` opens the Comment picker. Selecting a Comment opens the Comment Editor for editing that persisted Comment.
+- Normal edit-comment-under-cursor from `comment_list` opens the matching Comment directly when exactly one Comment covers the cursor line, opens a picker when multiple Comments match, and notifies when none match.
 - Comment Editor submit validates at least one draft reference and non-empty trimmed body, then creates or updates one persisted Comment.
 - Comment Editor cancel discards draft state. Canceling a new Comment Editor creates nothing.
-- Voice start/stop from the Comment Editor transitions through `recording`, `transcribing`, and either back to `composer` or to `voice_error_pending`.
+- Voice start/stop from the Comment Editor transitions through `recording_starting`, `recording`, `transcribing`, and either back to `composer` or to `voice_error_pending`.
 - Opening Preview enters `preview` if validation passes.
 - Closing Preview restores the previous Review Mode state if Review Mode is still active.
 - Quit from any active state stops helper processes, discards transient composer/audio/preview state, closes UI, persists durable data, and returns to `inactive`.
@@ -266,20 +278,20 @@ Core transitions:
 Guards:
 
 - Review picker opens from `comment_list`, `review_picker`, or `preview`; it is blocked from the Comment Editor and voice states.
-- Switching Reviews from `composer`, `recording`, `transcribing`, or `voice_error_pending` is blocked.
-- Preview is blocked while a composer is open, recording, transcribing, or voice error is pending.
+- Switching Reviews from `composer`, `recording_starting`, `recording`, `transcribing`, or `voice_error_pending` is blocked.
+- Preview is blocked while a composer is open, recording startup is active, recording, transcribing, or voice error is pending.
 - While the Comment Editor is open, code-buffer Review Mode actions notify: `Submit or cancel the Comment Editor first.`
 - While voice error is pending, only retry, discard, cancel composer, and quit are allowed.
-- During recording and transcribing, add-reference, edit-comment, Review switching, and preview are blocked.
+- During recording startup, recording, and transcribing, add-reference, edit-comment, Review switching, and preview are blocked.
 
 ## Project root and paths
 
 Root detection on `:CodeReview`:
 
-1. If the current buffer is a normal saved file buffer, start from that file.
-2. Otherwise start from the current working directory.
-3. Use `vim.fs.root(source, { ".git" })`.
-4. Fallback to current working directory.
+1. Find a visible named normal file window, preferring the current window, previous window, then another current-tab window.
+2. If no visible named file window exists, notify and do not start Review Mode.
+3. Detect root from that file with `.git` ancestry when available.
+4. Fallback to current working directory only inside shared root-detection helpers used by non-start contexts such as inactive health or clear-data.
 
 The detected root is locked for the Review Mode session. It does not change when `cwd` changes.
 
@@ -314,12 +326,13 @@ Storage rules:
 
 - Top-level `schema_version` is required.
 - Review, Comment, and File Reference IDs are random UUID-like strings with prefixes.
-- Timestamps are ISO 8601 UTC.
+- Timestamps are semantically valid ISO 8601 UTC values.
 - Writes go to a temporary file in the same directory and then atomically rename over the target.
 - Persistence is debounced after changes.
 - Exit and `VimLeavePre` force a write.
 - Concurrent sessions are last-write-wins for MVP.
 - Strong lock-file protection is future work.
+- The selected voice microphone is stored separately as a machine-local preference at `stdpath("state")/code-review.nvim/voice-device.json`; it is not Review data and is not deleted by `:CodeReviewClearData`.
 
 Corrupt store behavior:
 
@@ -561,7 +574,9 @@ Behavior:
 - Normal `<leader>d` on a draft File Reference removes that draft reference.
 - `Go to` jumps the source window to that File Reference and keeps the Comment Editor open.
 - Normal `q` and Normal `<Esc>` cancel from composer sections.
-- Normal `<leader><Space>` toggles voice recording.
+- Normal `<leader><Space>` starts, stops, or retries voice recording.
+- Normal `<leader>rm` chooses the microphone and preserves the current draft.
+- Normal `<leader>x` discards a failed voice transcription while `voice_error_pending`.
 - Normal `?` opens read-only Comment Editor help; `q` and `<Esc>` close help without canceling the Comment Editor.
 - Submit refuses zero references or empty trimmed body and keeps the composer open.
 - Canceling a new Comment Editor creates no Comment.
@@ -604,8 +619,9 @@ Preview is blocked if:
 - any Comment is incomplete;
 - any File Reference is stale;
 - there are zero complete Comments;
+- any visible source buffer inside the locked root is modified;
 - a composer is open;
-- voice is recording/transcribing; or
+- voice is starting, recording, or transcribing; or
 - voice error is pending.
 
 Blocking notifications include counts when useful, for example:
@@ -666,18 +682,23 @@ Codex auth token expired, please run codex login.
 
 ### Flow
 
-1. Normal `<leader><Space>` in the Comment Editor starts recording for the active draft.
-2. Sidebar and Comment Editor show recording state.
-3. Normal `<leader><Space>` stops recording.
-4. Sidebar and Comment Editor show transcribing state.
-5. Successful transcription inserts text at the composer cursor.
-6. Failed transcription shows retry/discard inside the composer.
-7. Retry reuses the same temp audio.
-8. Discard deletes temp audio and returns to the composer.
+1. Opening the Comment Editor asynchronously prewarms microphone discovery and starts a prearmed helper for the selected, cached, or helper-recommended microphone.
+2. The prearmed helper opens the microphone and emits `recording_ready` only after the first PCM samples arrive. While prearmed, audio is kept only in memory and is not written or transcribed.
+3. Normal `<leader><Space>` in the Comment Editor starts recording for the active draft. If prearm is ready, Neovim sends `start\n` to the hot helper. If prearm is warming, the panel stays `Starting` until ready. If prearm failed or is unavailable, Neovim falls back to one-shot recording with the same PCM readiness barrier.
+4. The Comment Editor voice panel shows `Starting` until the helper emits `recording_started`.
+5. A second `<leader><Space>` during startup cancels startup, kills the helper, deletes temp audio, and returns to the composer.
+6. After `recording_started`, the Comment Editor voice panel shows recording state.
+7. Normal `<leader><Space>` stops recording.
+8. The Comment Editor voice panel shows transcribing state.
+9. Successful transcription inserts text at the composer cursor.
+10. Failed transcription shows retry/discard in the Comment Editor legend and help.
+11. Retry reuses the same temp audio.
+12. `<leader>x` discard deletes temp audio and returns to the composer.
 
 Limits:
 
 - Maximum recording duration: 60 seconds.
+- In-memory pre-roll: 250 ms by default.
 - Recording request timeout: 65 seconds.
 - Transcription timeout: 120 seconds.
 - Reject clips shorter than 900 ms with a non-error notification.
@@ -693,7 +714,7 @@ stdpath("cache")/code-review.nvim/voice
 
 Delete temp audio after successful append, discard, max retry, or Review Mode exit.
 
-Async completion may append only if captured `session_id`, `review_id`, and `comment_id` still match and the Comment still exists. Otherwise discard result, delete temp audio, and notify.
+Async completion may append only if captured `session_id`, `review_id`, and composer buffer identity still match. Otherwise discard result, delete temp audio, and notify.
 
 ### Helper implementation
 
@@ -701,7 +722,9 @@ Runtime invokes:
 
 ```text
 node voice/dist/index.js health
-node voice/dist/index.js record --out <absolute-temp-wav-path> --max-ms 60000 --jsonl
+node voice/dist/index.js devices --json
+node voice/dist/index.js record --out <absolute-temp-wav-path> --max-ms 60000 --audio-device <opaque-device-id> --jsonl
+node voice/dist/index.js record --prearm --out <absolute-temp-wav-path> --max-ms 60000 --audio-device <opaque-device-id> --jsonl
 node voice/dist/index.js transcribe --input <absolute-temp-wav-path> --json
 ```
 
@@ -711,19 +734,49 @@ Requirements:
 - Runtime uses compiled JavaScript at `voice/dist/index.js`.
 - Use direct HTTP requests, not the OpenAI Node SDK.
 - Implement record-then-transcribe, not realtime transcription.
-- Capture mono PCM from default microphone, encode as WAV, upload WAV.
-- Use `decibri` as the MVP microphone capture dependency, pinned in `voice/package-lock.json`.
+- Capture mono PCM from the selected microphone, encode as WAV in the helper, upload WAV.
+- Use ffmpeg as the primary microphone capture provider on macOS and Windows. Keep `decibri` pinned in `voice/package-lock.json` as the fallback capture dependency where applicable.
+- On macOS, use `ffmpeg` with AVFoundation when available so the helper can list and select the same audio inputs it records.
+- On Windows, normalize DirectShow audio devices through the same helper contract; Windows live voice qualification remains out of scope for this cleanup.
+- Trusted opaque `--audio-device` IDs resolve without listing devices on the recording hot path. Legacy names and raw index hints may still list devices for compatibility.
+- Neovim keeps a session-only microphone listing cache, prewarmed asynchronously when the Comment Editor opens, refreshed from the microphone picker, and refreshed after `audio_device_unavailable`. The default cache TTL is 60 seconds.
+- Neovim keeps a prearmed recording helper alive while the Comment Editor remains open, and stops it on composer close, submit, cancel, Review Mode quit, microphone switch, or stale `audio_device_unavailable`.
 - If the audio provider cannot support the target platform without a compile toolchain, recording reports `audio_provider_unavailable`; manual Review Mode still works.
+
+Device command behavior:
+
+- Lists microphone inputs without opening a recording stream.
+- Returns normalized devices with `id`, `provider`, `kind`, `name`, `index`, `virtuality`, `confidence`, `reasons`, and `selection`.
+- Includes `defaultSelection` when the provider exposes an OS/system default.
+- Includes `recommendedSelection`, preferring likely physical microphones over likely virtual inputs.
+- Virtual microphone detection is advisory; picker UI must show all devices and allow explicit virtual-device selection.
 
 Record command behavior:
 
 - Long-running process.
-- Opens default microphone.
-- Starts writing WAV to requested temp path.
+- Opens the selected microphone, or otherwise the helper-recommended microphone before provider default; it must never implicitly fall back to raw AVFoundation index `0`. Explicit System Default remains selectable.
+- A stale trusted opaque microphone ID reports `audio_device_unavailable`; it must not silently fall back to another microphone.
+- Captures raw PCM from ffmpeg stdout and writes the WAV header/data in Node.
+- Waits for real PCM samples before reporting readiness.
+- One-shot recording starts writing WAV to the requested temp path only after PCM readiness.
+- Prearmed recording opens the microphone first, keeps a small in-memory pre-roll buffer, emits `recording_ready`, and waits for `start\n` before writing WAV.
+- Pre-roll is prepended to the WAV after `start\n` to protect the beginning of speech.
 - Emits one JSON line after start:
 
 ```json
 { "ok": true, "event": "recording_started" }
+```
+
+In prearmed mode, the helper first emits:
+
+```json
+{ "ok": true, "event": "recording_ready" }
+```
+
+Neovim starts a prearmed recording by writing:
+
+```text
+start\n
 ```
 
 Neovim stops recording by writing:
@@ -787,8 +840,10 @@ Failure codes:
 - `invalid_credentials`
 - `codex_auth_expired`
 - `audio_provider_unavailable`
+- `audio_device_unavailable`
 - `recording_permission_denied`
 - `recording_too_short`
+- `empty_recording`
 - `audio_too_large`
 - `network_error`
 - `http_error`
@@ -805,7 +860,8 @@ Exit codes:
 | `1` | Expected operational failure represented by JSON error. |
 | `2` | Invalid CLI arguments. |
 | `3` | Unexpected internal failure; stderr must remain redacted. |
-| `124` | Helper-enforced timeout. |
+
+Timeouts return structured JSON with `ok=false`, `code="timeout"`, and an expected operational exit code. Lua also uses watchdogs to bound helper callbacks that never arrive.
 
 Lua maps JSON error codes to notifications. Nonzero exit without JSON maps to `unknown`.
 
@@ -875,8 +931,8 @@ Mapping:
 Account id source order:
 
 1. `tokens.account_id`
-2. JWT claim `https://api.openai.com/auth.chatgpt_account_id` from `access_token`
-3. Same claim from `id_token`
+2. Nested JWT claim under `https://api.openai.com/auth`, field `chatgpt_account_id`, from `access_token`
+3. Same nested claim from `id_token`
 
 Omit `ChatGPT-Account-Id` if unavailable.
 
@@ -977,7 +1033,7 @@ Redaction requirements:
 
 Build through TDD. Write failing tests before implementation where practical.
 
-Lua tests use Plenary and must cover:
+Lua tests run through the repository-local harness in `tests/minimal_init.lua`, which exposes the compatibility command `PlenaryBustedDirectory`. They must cover:
 
 - storage schema load/save;
 - corrupt store backup;
@@ -1025,7 +1081,9 @@ Helper tests must cover:
 Concrete validation commands:
 
 ```bash
-nvim --headless -u tests/minimal_init.lua -c "PlenaryBustedDirectory tests/spec { minimal_init = 'tests/minimal_init.lua' }"
+scripts/validate.sh
+NVIM_011=/path/to/nvim-0.11 scripts/validate.sh
+nvim --headless -i NONE -u tests/minimal_init.lua -c "PlenaryBustedDirectory tests/spec { minimal_init = 'tests/minimal_init.lua' }" -c qa
 npm ci --prefix voice
 npm test --prefix voice
 npm run typecheck --prefix voice

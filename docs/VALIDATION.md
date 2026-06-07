@@ -33,6 +33,7 @@ NVIM=/path/to/nvim-0.11 sh scripts/smoke.sh
 Expected:
 
 - Lua specs pass.
+- Lua specs run through the repo-local `tests/minimal_init.lua` harness exposed as `PlenaryBustedDirectory`.
 - Voice helper tests pass without real credentials, microphone, or network.
 - TypeScript typecheck runs real `tsc --noEmit`.
 - Voice helper build creates `voice/dist/index.js`.
@@ -45,6 +46,7 @@ Requires fresh Codex ChatGPT auth and microphone access:
 ```sh
 codex login
 node voice/dist/index.js health
+node voice/dist/index.js devices --json
 scripts/voice-smoke.sh
 ```
 
@@ -52,8 +54,12 @@ Expected:
 
 - Health reports usable Codex ChatGPT auth.
 - Health does not open the microphone.
+- Device listing prints normalized microphone inputs and may label likely virtual devices.
 - The smoke script records one short clip, transcribes it, prints transcript JSON, and deletes the temp audio file.
+- In Neovim, opening the Comment Editor prearms the selected microphone; after prearm is ready, pressing voice should move from `Starting` to `Recording` quickly and capture the beginning of speech.
+- To force a microphone during smoke, run `CODE_REVIEW_VOICE_AUDIO_DEVICE=<id-or-name> scripts/voice-smoke.sh`.
 - Missing or expired auth tells the user to run `codex login`.
+- Voice is release-qualified on macOS for now. Windows device parsing has unit coverage, but Windows live voice remains unqualified; no Windows live gate is required for this cleanup.
 
 ## External Reviewer Gate
 
