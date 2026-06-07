@@ -234,6 +234,36 @@ describe("comment composer", function()
     code_review.quit()
   end)
 
+  it("allows deleting the last draft File Reference and blocks zero-reference submit", function()
+    local code_review, actions, state, model = start_project()
+    select_lines(actions, 1, 1)
+    local composer_module = require("code-review.composer")
+    local old_select = vim.ui.select
+    local old_notify = vim.notify
+    local messages = {}
+    vim.ui.select = function(_, _, cb)
+      cb("Delete")
+    end
+    vim.notify = function(message)
+      messages[#messages + 1] = message
+    end
+
+    composer_module.delete_reference_under_cursor()
+    local composer = state.get().composer
+    assert.equals("No draft File References", vim.trim(refs_text(composer)))
+    vim.api.nvim_buf_set_lines(composer.body_buf, 0, -1, false, { "body" })
+    composer_module.submit()
+
+    vim.ui.select = old_select
+    vim.notify = old_notify
+    local review = model.find_review(state.get().store, state.get().active_review_id)
+    assert.equals(0, #review.comments)
+    assert.equals("composer", state.mode())
+    assert.equals("Add at least one File Reference before submitting.", messages[#messages])
+    composer_module.cancel()
+    code_review.quit()
+  end)
+
   it("opens a stacked composer focused on a body-only comment buffer", function()
     local code_review, actions, state = start_project()
     require("code-review.config").setup({ voice = { enabled = false } })
@@ -709,26 +739,20 @@ describe("comment composer", function()
     code_review.quit()
   end)
 
-  it("keeps the last File Reference when leader delete is requested", function()
+  it("deletes the last File Reference when leader delete is requested", function()
     local code_review, actions, state = start_project()
     select_lines(actions, 1, 1)
     local composer = state.get().composer
     require("code-review.composer").focus_references()
     vim.api.nvim_win_set_cursor(composer.refs_win, { 1, 0 })
-    local messages = {}
-    local old_notify = vim.notify
     local old_select = vim.ui.select
-    vim.notify = function(message)
-      messages[#messages + 1] = message
-    end
-    vim.ui.select = function()
-      error("delete confirmation should not open for the last File Reference")
+    vim.ui.select = function(_, _, cb)
+      cb("Delete")
     end
     get_normal_map(composer.refs_buf, "<Leader>d").callback()
-    vim.notify = old_notify
     vim.ui.select = old_select
-    assert.equals(1, #composer.references)
-    assert.equals("Keep at least one File Reference on the comment.", messages[1])
+    assert.equals(0, #composer.references)
+    assert.equals("No draft File References", vim.trim(refs_text(composer)))
     require("code-review.composer").cancel()
     code_review.quit()
   end)
