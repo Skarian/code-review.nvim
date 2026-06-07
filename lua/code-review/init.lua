@@ -387,7 +387,10 @@ function M.clear_data()
   local project_root = state.is_active() and state.get().root or root.detect(0)
   local function do_clear()
     if state.is_active() then
-      M.quit()
+      local quit_ok = M.quit()
+      if quit_ok == false or state.is_active() then
+        return
+      end
     end
     local ok, err = storage.clear_current(project_root)
     if ok then

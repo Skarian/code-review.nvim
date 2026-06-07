@@ -118,4 +118,44 @@ describe("health and clear data", function()
     vim.ui.select = old_select
     assert.equals(0, vim.fn.filereadable(handle.path))
   end)
+
+  it("does not clear data when active Review Mode refuses to quit", function()
+    local code_review = require("code-review")
+    local config = require("code-review.config")
+    local actions = require("code-review.actions")
+    local state = require("code-review.state")
+    local storage = require("code-review.storage")
+    local project = vim.fn.tempname()
+    vim.fn.mkdir(project .. "/.git", "p")
+    vim.fn.writefile({ "x" }, project .. "/x.lua")
+    config.setup({ storage = { dir = project .. "/store" } })
+    vim.cmd.edit(project .. "/x.lua")
+    code_review.start()
+    actions.create_review("Clear")
+    vim.fn.setpos("'<", { 0, 1, 1, 0 })
+    vim.fn.setpos("'>", { 0, 1, 1, 0 })
+    actions.add_reference()
+    vim.api.nvim_buf_set_lines(state.get().composer.body_buf, 0, -1, false, { "body" })
+    require("code-review.composer").submit()
+    assert.is_true(storage.flush(state.get().storage))
+    local store_path = state.get().storage.path
+    assert.equals(1, vim.fn.filereadable(store_path))
+    actions.preview()
+    local preview_buf = state.get().preview.buf
+    vim.api.nvim_buf_set_lines(preview_buf, -1, -1, false, { "user edit" })
+    assert.is_true(vim.bo[preview_buf].modified)
+    local old_select = vim.ui.select
+    vim.ui.select = function(_, _, cb)
+      cb("Delete")
+    end
+
+    code_review.clear_data()
+
+    vim.ui.select = old_select
+    assert.equals(1, vim.fn.filereadable(store_path))
+    assert.is_true(code_review.is_active())
+    assert.equals("preview", state.mode())
+    vim.bo[preview_buf].modified = false
+    code_review.quit()
+  end)
 end)
