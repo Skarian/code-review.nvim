@@ -79,14 +79,27 @@ local function word_like(char)
   return char ~= "" and char:match("[%w_]") ~= nil
 end
 
+local function punctuation_like(char)
+  return char ~= "" and char:match("[%.%!%?,;:]") ~= nil
+end
+
+local function first_nonspace(text)
+  return (text or ""):match("^%s*(.)") or ""
+end
+
 local function add_insert_boundary_spaces(lines, line, col)
   if #lines == 0 then
     return lines
   end
   local before = col > 0 and line:sub(col, col) or ""
   local after = line:sub(col + 1, col + 1)
+  local first = first_nonspace(lines[1])
   if before:match("%S") and lines[1]:match("^%S") then
-    lines[1] = " " .. lines[1]
+    local separator = " "
+    if punctuation_like(first) then
+      separator = ""
+    end
+    lines[1] = separator .. lines[1]
   end
   if word_like(after) and lines[#lines]:match("%S$") then
     lines[#lines] = lines[#lines] .. " "
@@ -730,6 +743,14 @@ function M.insert_text(text)
   local line = vim.api.nvim_buf_get_lines(composer.body_buf, row, row + 1, false)[1] or ""
   local lines = add_insert_boundary_spaces(vim.split(text, "\n", { plain = true }), line, col)
   vim.api.nvim_buf_set_text(composer.body_buf, row, col, row, col, lines)
+  if valid_win(composer.body_win) then
+    local cursor_row = row + #lines
+    local cursor_col = #lines[#lines]
+    if #lines == 1 then
+      cursor_col = col + cursor_col
+    end
+    pcall(vim.api.nvim_win_set_cursor, composer.body_win, { cursor_row, cursor_col })
+  end
   M.refresh()
   return true
 end

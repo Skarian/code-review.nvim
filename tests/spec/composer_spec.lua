@@ -792,6 +792,9 @@ describe("comment composer", function()
     assert.equals("voice start", insert_on_line("start", 0, "voice"))
     assert.equals("start voice", insert_on_line("start", 5, "voice"))
     assert.equals("start voice, end", insert_on_line("start, end", 5, "voice"))
+    assert.equals("hello, world", insert_on_line("hello world", 5, ","))
+    assert.equals("wood??", insert_on_line("wood?", 4, "?"))
+    assert.equals("today This is Ruby", insert_on_line("today", 5, "This is Ruby"))
     assert.equals("alpha one\ntwo omega", insert_on_line("alphaomega", 5, "one\ntwo"))
 
     composer_module.cancel()
@@ -812,6 +815,49 @@ describe("comment composer", function()
     assert.is_true(composer_module.insert_text("voice"))
     assert.equals("second voice ", composer_text(composer))
     assert.equals("second", comment.body)
+
+    composer_module.cancel()
+    code_review.quit()
+  end)
+
+  it("keeps repeated voice transcripts separated in one composer session", function()
+    local code_review, actions, state = start_project()
+    select_lines(actions, 1, 1)
+    local composer = state.get().composer
+    local composer_module = require("code-review.composer")
+    vim.api.nvim_buf_set_lines(composer.body_buf, 0, -1, false, { "" })
+    vim.api.nvim_win_set_cursor(composer.body_win, { 1, 0 })
+
+    assert.is_true(composer_module.insert_text("Hello, how are you doing today?"))
+    assert.is_true(composer_module.insert_text("This is Ruby reporting in for duty."))
+    assert.is_true(composer_module.insert_text("How much wood could a woodchuck chuck if a woodchuck could chuck wood?"))
+
+    assert.equals(
+      "Hello, how are you doing today? This is Ruby reporting in for duty. How much wood could a woodchuck chuck if a woodchuck could chuck wood?",
+      composer_text(composer)
+    )
+    assert.same({ 1, #composer_text(composer) }, vim.api.nvim_win_get_cursor(composer.body_win))
+
+    composer_module.cancel()
+    code_review.quit()
+  end)
+
+  it("preserves question marks across repeated voice inserts", function()
+    local code_review, actions, state = start_project()
+    select_lines(actions, 1, 1)
+    local composer = state.get().composer
+    local composer_module = require("code-review.composer")
+    vim.api.nvim_buf_set_lines(composer.body_buf, 0, -1, false, { "" })
+    vim.api.nvim_win_set_cursor(composer.body_win, { 1, 0 })
+
+    local question = "Can you add a section here about the project details?"
+    assert.is_true(composer_module.insert_text(question))
+    assert.equals(question, composer_text(composer))
+    assert.same({ 1, #question }, vim.api.nvim_win_get_cursor(composer.body_win))
+    assert.is_true(composer_module.insert_text(question))
+
+    assert.equals(question .. " " .. question, composer_text(composer))
+    assert.same({ 1, #(question .. " " .. question) }, vim.api.nvim_win_get_cursor(composer.body_win))
 
     composer_module.cancel()
     code_review.quit()
@@ -850,6 +896,7 @@ describe("comment composer", function()
     end)
     local line = vim.api.nvim_buf_get_lines(composer.body_buf, 0, 1, false)[1]
     assert.equals("start voice end", line)
+    assert.same({ 1, 12 }, vim.api.nvim_win_get_cursor(composer.body_win))
     assert.equals(nil, composer.spinner_timer)
     local current_win = vim.api.nvim_get_current_win()
     local cursor = vim.api.nvim_win_get_cursor(composer.body_win)
