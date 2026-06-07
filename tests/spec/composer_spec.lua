@@ -292,6 +292,44 @@ describe("comment composer", function()
     code_review.quit()
   end)
 
+  it("shows and maps voice discard while retryable voice errors are pending", function()
+    local code_review, actions, state = start_project()
+    select_lines(actions, 1, 1)
+    local composer_module = require("code-review.composer")
+    local composer = state.get().composer
+    local audio_path = vim.fn.tempname() .. ".wav"
+    vim.fn.writefile({ "wav" }, audio_path)
+    state.get().voice = {
+      id = 1001,
+      phase = "error_pending",
+      audio_path = audio_path,
+      session_id = state.get().session_id,
+      review_id = state.get().active_review_id,
+      composer_buf = composer.buf,
+      attempts = 1,
+    }
+    state.set_mode("voice_error_pending")
+    composer_module.refresh()
+
+    assert.is_true(has_normal_map(composer.body_buf, "<leader>x"))
+    assert.is_true(has_normal_map(composer.refs_buf, "<leader>x"))
+    assert.truthy(legend_text(composer):find("<leader><Space> retry", 1, true))
+    assert.truthy(legend_text(composer):find("<leader>x discard", 1, true))
+    local _, _, help_buf = composer_module.show_help()
+    local help = table.concat(vim.api.nvim_buf_get_lines(help_buf, 0, -1, false), "\n")
+    assert.truthy(help:find("<leader>x", 1, true))
+    pcall(vim.api.nvim_buf_delete, help_buf, { force = true })
+
+    vim.api.nvim_set_current_win(composer.body_win)
+    vim.cmd("normal \\x")
+
+    assert.equals("composer", state.mode())
+    assert.equals(nil, state.get().voice)
+    assert.equals(0, vim.fn.filereadable(audio_path))
+    composer_module.cancel()
+    code_review.quit()
+  end)
+
   it("submits a complete comment from the selected reference and body", function()
     local code_review, actions, state, model = start_project()
     select_lines(actions, 2, 3)
@@ -609,8 +647,9 @@ describe("comment composer", function()
     assert.truthy(text:find("Delete removes it; Go to jumps the source window to that line", 1, true))
     assert.truthy(text:find("<leader>d   Delete the focused reference", 1, true))
     assert.truthy(text:find("<leader>d   Delete the whole comment or draft", 1, true))
-    assert.truthy(text:find("<leader><Space> Start, stop, or retry voice recording", 1, true))
+    assert.truthy(text:find("<leader><Space> Start, cancel startup, stop, or retry voice recording", 1, true))
     assert.truthy(text:find("Submit requires comment text and at least one File Reference", 1, true))
+    assert.truthy(text:find("Starting      Voice helper is opening the microphone", 1, true))
     assert.truthy(text:find("Transcribing  Voice is being transcribed", 1, true))
     local maps = vim.api.nvim_buf_get_keymap(buf, "n")
     local seen_q, seen_esc = false, false
@@ -942,9 +981,13 @@ describe("comment composer", function()
     end
     require("code-review.voice").toggle()
     assert.truthy(record_opts)
-    assert_voice_frame_line(composer, recording_frames, "Recording")
+    assert.equals("recording_starting", state.mode())
+    assert_voice_frame_line(composer, recording_frames, "Starting")
     assert.truthy(composer.spinner_timer)
     local first_timer = composer.spinner_timer
+    record_opts.on_event({ ok = true, event = "recording_started" })
+    assert.equals("recording", state.mode())
+    assert_voice_frame_line(composer, recording_frames, "Recording")
     require("code-review.voice").toggle()
     assert.truthy(transcribe_opts)
     assert_voice_frame_line(composer, transcribing_frames, "Transcribing")

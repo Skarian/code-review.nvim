@@ -287,6 +287,9 @@ function M._register_commands()
   vim.api.nvim_create_user_command("CodeReviewClearData", function()
     M.clear_data()
   end, {})
+  vim.api.nvim_create_user_command("CodeReviewVoiceDevices", function()
+    require("code-review.voice").pick_microphone()
+  end, {})
 end
 
 function M.setup(opts)

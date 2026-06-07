@@ -118,6 +118,9 @@ end
 
 local function voice_status_label()
   local s = state.get()
+  if s.mode == "recording_starting" then
+    return "Starting"
+  end
   if s.mode == "recording" then
     return "Recording"
   end
@@ -159,12 +162,12 @@ end
 
 local function voice_active()
   local mode = state.mode()
-  return mode == "recording" or mode == "transcribing"
+  return mode == "recording_starting" or mode == "recording" or mode == "transcribing"
 end
 
 local function active_voice_frames()
   local mode = state.mode()
-  if mode == "recording" then
+  if mode == "recording_starting" or mode == "recording" then
     return recording_frames
   end
   if mode == "transcribing" then
@@ -207,13 +210,23 @@ end
 local function legend_lines(composer)
   local width = valid_win(composer.legend_win) and vim.api.nvim_win_get_width(composer.legend_win) or 92
   local height = valid_win(composer.legend_win) and vim.api.nvim_win_get_height(composer.legend_win) or 3
+  local voice_error = state.mode() == "voice_error_pending"
   if height <= 1 then
+    if voice_error and width >= 42 then
+      return { "<leader><Space> retry | <leader>x discard" }
+    end
     if width >= 32 then
       return { "Enter submit | q cancel | ? help" }
     end
     return { "Enter | q | ?" }
   end
   if width >= 58 then
+    if voice_error then
+      return {
+        "Enter submit | <leader><Space> retry | <leader>x discard",
+        "q cancel | Tab switch panels | ? help",
+      }
+    end
     return {
       "Enter submit | <leader><Space> voice | <leader>d delete",
       "q cancel | Tab switch panels | ? help",
@@ -221,6 +234,18 @@ local function legend_lines(composer)
   end
   if width < 37 then
     if height <= 2 then
+      if voice_error then
+        if width >= 20 then
+          return {
+            "Enter submit | retry",
+            "discard | q | ?",
+          }
+        end
+        return {
+          "Enter | retry",
+          "discard | q",
+        }
+      end
       if width >= 20 then
         return {
           "Enter submit | voice",
@@ -232,6 +257,13 @@ local function legend_lines(composer)
         "delete | q | ?",
       }
     end
+    if voice_error then
+      return {
+        "Enter submit",
+        "retry | discard",
+        "q cancel | ? help",
+      }
+    end
     return {
       "Enter submit",
       "voice | delete",
@@ -239,9 +271,22 @@ local function legend_lines(composer)
     }
   end
   if height <= 2 then
+    if voice_error then
+      return {
+        "Enter submit | <leader><Space> retry",
+        "<leader>x discard | q cancel | ? help",
+      }
+    end
     return {
       "Enter submit | <leader><Space> voice",
       "<leader>d delete | q cancel | ? help",
+    }
+  end
+  if voice_error then
+    return {
+      "Enter submit | <leader><Space> retry",
+      "<leader>x discard | q cancel",
+      "Tab switch panels | ? help",
     }
   end
   return {
@@ -375,6 +420,7 @@ local function clear_composer(delete_buf)
   if s.voice then
     pcall(require("code-review.voice").stop)
   end
+  pcall(require("code-review.voice").stop_prearm)
   if composer.resize_autocmd then
     pcall(vim.api.nvim_del_autocmd, composer.resize_autocmd)
     composer.resize_autocmd = nil
@@ -490,11 +536,13 @@ local function register_buffer_which_key(buf, delete_desc)
     pcall(which_key.add, {
       { "<leader>d", desc = delete_desc, mode = "n", buffer = buf },
       { "<leader><Space>", desc = "Toggle Code Review voice", mode = "n", buffer = buf },
+      { "<leader>x", desc = "Discard Code Review voice transcription", mode = "n", buffer = buf },
     })
   elseif which_key.register then
     pcall(which_key.register, {
       ["<leader>d"] = delete_desc,
       ["<leader><Space>"] = "Toggle Code Review voice",
+      ["<leader>x"] = "Discard Code Review voice transcription",
     }, { mode = "n", buffer = buf })
   end
 end
@@ -503,6 +551,13 @@ local function apply_common_keymaps(buf)
   vim.keymap.set("n", "<leader><Space>", function()
     require("code-review.voice").toggle()
   end, { buffer = buf, nowait = true, desc = "Toggle Code Review voice" })
+  vim.keymap.set("n", "<leader>x", function()
+    if state.mode() == "voice_error_pending" and state.get().voice then
+      require("code-review.voice").discard()
+    else
+      notify.warn("No voice transcription to discard.")
+    end
+  end, { buffer = buf, nowait = true, desc = "Discard Code Review voice transcription" })
   vim.keymap.set("n", "q", function()
     require("code-review.composer").cancel()
   end, { buffer = buf, nowait = true, desc = "Cancel Code Review comment" })
@@ -601,6 +656,16 @@ local function open(opts)
   })
   state.set_mode("composer")
   M.refresh()
+  vim.schedule(function()
+    local current = state.get().composer
+    if current and current.body_buf == composer.body_buf then
+      local ok_voice, voice = pcall(require, "code-review.voice")
+      if ok_voice then
+        pcall(voice.prewarm_devices)
+        pcall(voice.start_prearm)
+      end
+    end
+  end)
   refresh_draft_highlights()
   focus_section("body")
   if opts.start_insert == false then
@@ -697,7 +762,9 @@ function M.show_help()
     "  Key          Action",
     "  Enter        Submit the comment",
     "  <leader>d   Delete the whole comment or draft",
-    "  <leader><Space> Start, stop, or retry voice recording",
+    "  <leader><Space> Start, cancel startup, stop, or retry voice recording",
+    "  <leader>rm  Choose microphone",
+    "  <leader>x   Discard a failed voice transcription",
     "  q or Esc     Cancel from Normal mode",
     "  ?            Show help",
     "",
@@ -712,9 +779,10 @@ function M.show_help()
     "",
     "Voice Dictation",
     "  Ready         Voice is ready",
+    "  Starting      Voice helper is opening the microphone",
     "  Recording     Voice is recording",
     "  Transcribing  Voice is being transcribed",
-    "  Failed        Voice dictation failed; the notification explains what happened",
+    "  Failed        Voice dictation failed; retry with <leader><Space> or discard with <leader>x",
   })
 end
 

@@ -77,26 +77,35 @@ describe("voice support", function()
     local path = temp.wav_path()
     assert.truthy(path:find("code%-review%.nvim/voice") or path:find("code%-review%.nvim\\voice"))
   end)
-  it("ignores late recording events and blocks re-entry while transcribing", function()
+  it("uses starting state, cancels startup, and blocks re-entry while transcribing", function()
     local voice = require("code-review.voice")
     local code_review, state, process = start_composer({ voice = { max_recording_ms = 200 } })
     local old_record = process.record
     local record_opts
+    local first_record_opts
     local record_count = 0
     process.record = function(opts)
       record_count = record_count + 1
       record_opts = opts
+      first_record_opts = first_record_opts or opts
       return { stop = function() return true end, discard = function() return true end, kill = function() end }
     end
 
     voice.toggle()
+    assert.equals("recording_starting", state.mode())
+    voice.toggle()
+    assert.equals("composer", state.mode())
+    assert.equals(nil, state.get().voice)
+    first_record_opts.on_event({ ok = true, event = "recording_started" })
+    assert.equals("composer", state.mode())
+    voice.toggle()
+    assert.equals("recording_starting", state.mode())
+    record_opts.on_event({ ok = true, event = "recording_started" })
     assert.equals("recording", state.mode())
     voice.toggle()
     assert.equals("transcribing", state.mode())
-    record_opts.on_event({ ok = true, event = "recording_started" })
-    assert.equals("transcribing", state.mode())
     voice.toggle()
-    assert.equals(1, record_count)
+    assert.equals(2, record_count)
     assert.equals("transcribing", state.mode())
 
     process.record = old_record
@@ -109,7 +118,9 @@ describe("voice support", function()
     local code_review, state, process = start_composer()
     local old_record = process.record
     local killed = false
-    process.record = function()
+    local record_opts
+    process.record = function(opts)
+      record_opts = opts
       return {
         stop = function() return false end,
         discard = function() return false end,
@@ -118,6 +129,7 @@ describe("voice support", function()
     end
 
     voice.toggle()
+    record_opts.on_event({ ok = true, event = "recording_started" })
     assert.equals("recording", state.mode())
     voice.toggle()
     assert.equals("composer", state.mode())
@@ -137,6 +149,7 @@ describe("voice support", function()
     local killed_record = false
     local killed_transcribe = false
     process.record = function(opts)
+      opts.on_event({ ok = true, event = "recording_started" })
       return {
         stop = function()
           opts.on_exit(0, { ok = true, event = "recording_stopped", durationMillis = 1000, audioBytes = 3 }, "")
@@ -187,7 +200,8 @@ describe("voice support", function()
     code_review, state, process = start_composer({ voice = { max_recording_ms = 1000 } })
     old_record = process.record
     local killed_stopping_record = false
-    process.record = function()
+    process.record = function(opts)
+      opts.on_event({ ok = true, event = "recording_started" })
       return { stop = function() return true end, discard = function() return true end, kill = function() killed_stopping_record = true end }
     end
     voice.toggle()
@@ -207,6 +221,7 @@ describe("voice support", function()
     local old_transcribe = process.transcribe
     local killed_transcribe = false
     process.record = function(opts)
+      opts.on_event({ ok = true, event = "recording_started" })
       return {
         stop = function()
           opts.on_exit(0, { ok = true, event = "recording_stopped", durationMillis = 1000, audioBytes = 3 }, "")
@@ -276,6 +291,7 @@ describe("voice support", function()
     local old_transcribe = process.transcribe
     local transcribe_opts = {}
     process.record = function(opts)
+      opts.on_event({ ok = true, event = "recording_started" })
       return {
         stop = function()
           opts.on_exit(0, { ok = true, event = "recording_stopped", durationMillis = 1000, audioBytes = 3 }, "")

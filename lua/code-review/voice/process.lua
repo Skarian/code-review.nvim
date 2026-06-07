@@ -53,7 +53,7 @@ local function schedule_callback(callback, ...)
   end)
 end
 
-function M.record(opts)
+local function spawn_record(opts)
   local stdout = uv.new_pipe(false)
   local stderr = uv.new_pipe(false)
   local stdin = uv.new_pipe(false)
@@ -61,18 +61,28 @@ function M.record(opts)
   local stderr_text = {}
   local final = nil
   local handle
+  local args = {
+    opts.helper_path,
+    "record",
+    "--out",
+    opts.out,
+    "--max-ms",
+    tostring(opts.max_ms),
+    "--min-duration-ms",
+    tostring(opts.min_duration_ms),
+    "--jsonl",
+  }
+  if opts.prearm then
+    vim.list_extend(args, { "--prearm" })
+  end
+  if opts.pre_roll_ms then
+    vim.list_extend(args, { "--pre-roll-ms", tostring(opts.pre_roll_ms) })
+  end
+  if opts.audio_device then
+    vim.list_extend(args, { "--audio-device", tostring(opts.audio_device) })
+  end
   handle = uv.spawn(opts.node_cmd, {
-    args = {
-      opts.helper_path,
-      "record",
-      "--out",
-      opts.out,
-      "--max-ms",
-      tostring(opts.max_ms),
-      "--min-duration-ms",
-      tostring(opts.min_duration_ms),
-      "--jsonl",
-    },
+    args = args,
     stdio = { stdin, stdout, stderr },
   }, function(code)
     close_pipes(stdout, stderr, stdin)
@@ -118,6 +128,9 @@ function M.record(opts)
     return ok
   end
   return {
+    start = function()
+      return write_stdin("start\n")
+    end,
     stop = function()
       return write_stdin("stop\n")
     end,
@@ -130,6 +143,48 @@ function M.record(opts)
       end
     end,
   }
+end
+
+function M.record(opts)
+  return spawn_record(opts)
+end
+
+function M.prearm(opts)
+  opts.prearm = true
+  return spawn_record(opts)
+end
+
+function M.devices(opts)
+  local output = {}
+  local stderr = {}
+  local args = { opts.node_cmd, opts.helper_path, "devices", "--json" }
+  local ok, job = pcall(vim.system, args, { text = true }, function(result)
+    output[#output + 1] = result.stdout or ""
+    stderr[#stderr + 1] = result.stderr or ""
+    local decoded = json_decode(table.concat(output))
+    schedule_callback(opts.on_exit, result.code, decoded, redact.text(table.concat(stderr)))
+  end)
+  if not ok then
+    return nil, "failed to list voice devices"
+  end
+  return {
+    kill = function(signal)
+      if job and job.kill then
+        pcall(job.kill, job, signal or "sigterm")
+      end
+    end,
+  }
+end
+
+function M.devices_sync(opts)
+  local args = { opts.node_cmd, opts.helper_path, "devices", "--json" }
+  local ok, result = pcall(function()
+    return vim.system(args, { text = true }):wait()
+  end)
+  if not ok or not result then
+    return nil, "failed to list voice devices"
+  end
+  return json_decode(result.stdout or ""), redact.text(result.stderr or "")
 end
 
 function M.transcribe(opts)

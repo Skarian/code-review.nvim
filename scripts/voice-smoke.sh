@@ -30,7 +30,14 @@ case "$health_json" in
 esac
 
 mkfifo "$FIFO"
-"$NODE_BIN" "$HELPER" record --out "$AUDIO" --max-ms "$MAX_MS" --jsonl < "$FIFO" &
+devices_json="$("$NODE_BIN" "$HELPER" devices --json || true)"
+printf '%s\n' "$devices_json"
+if [ -n "${CODE_REVIEW_VOICE_AUDIO_DEVICE:-}" ]; then
+  echo "Using microphone: $CODE_REVIEW_VOICE_AUDIO_DEVICE"
+  "$NODE_BIN" "$HELPER" record --out "$AUDIO" --max-ms "$MAX_MS" --audio-device "$CODE_REVIEW_VOICE_AUDIO_DEVICE" --jsonl < "$FIFO" &
+else
+  "$NODE_BIN" "$HELPER" record --out "$AUDIO" --max-ms "$MAX_MS" --jsonl < "$FIFO" &
+fi
 record_pid=$!
 
 exec 3>"$FIFO"

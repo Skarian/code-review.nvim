@@ -1,4 +1,5 @@
 import { discoverCredentials } from "./auth.js";
+import { listAudioDevices } from "./devices.js";
 import { helperError, printJson } from "./errors.js";
 import { health } from "./health.js";
 import { recordCommand } from "./record.js";
@@ -15,6 +16,11 @@ export async function run(argv: string[] = process.argv.slice(2)): Promise<numbe
   if (command === "health") {
     printJson(await health({ network: !argv.includes("--no-network") }));
     return 0;
+  }
+  if (command === "devices") {
+    const result = await listAudioDevices();
+    printJson(result);
+    return exitCode(result);
   }
   if (command === "record") {
     const result = await recordCommand(argv.slice(1));

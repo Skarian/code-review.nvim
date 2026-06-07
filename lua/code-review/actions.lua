@@ -26,7 +26,7 @@ local function blocked_by_editor_or_voice()
     notify.warn("Submit or cancel the Comment Editor first.")
     return true
   end
-  if mode == "recording" or mode == "transcribing" or mode == "voice_error_pending" then
+  if mode == "recording_starting" or mode == "recording" or mode == "transcribing" or mode == "voice_error_pending" then
     notify.warn("Finish voice transcription first.")
     return true
   end
@@ -360,6 +360,10 @@ function M.toggle_voice()
   if require_active() then
     require("code-review.voice").toggle()
   end
+end
+
+function M.microphone()
+  require("code-review.voice").pick_microphone()
 end
 
 function M.preview()

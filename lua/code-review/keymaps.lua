@@ -12,6 +12,7 @@ local actions = {
   append_reference = { mode = "x", plug = "<Plug>(code-review-append-reference)", desc = "Append selection to comment" },
   edit_comment = { mode = "n", plug = "<Plug>(code-review-edit-comment)", desc = "Comment picker" },
   edit_comment_under_cursor = { mode = "n", plug = "<Plug>(code-review-edit-comment-under-cursor)", desc = "Edit comment under cursor" },
+  microphone = { mode = "n", plug = "<Plug>(code-review-microphone-picker)", desc = "Microphone picker" },
   preview = { mode = "n", plug = "<Plug>(code-review-preview)", desc = "Preview" },
   toggle = { mode = "n", plug = "<Plug>(code-review-toggle)", desc = "Toggle Review Mode" },
 }
